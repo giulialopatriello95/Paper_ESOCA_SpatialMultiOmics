@@ -1,0 +1,244 @@
+options(future.globals.maxSize = 1e9)
+library(Seurat)
+library(mclust)
+library(Seurat)
+library(ggplot2)
+library(reshape2)
+library(magrittr)
+library(future)
+options(future.globals.maxSize = 1e9)
+
+
+ReadAkoyaUpdate <- function (filename, type = c("inform", "processor", "qupath"), 
+                             filter = "DAPI|Blank|Empty", inform.quant = c("mean", "total", 
+                                                                           "min", "max", "std")) 
+{
+  if (!requireNamespace("data.table", quietly = TRUE)) {
+    stop("Please install 'data.table' for this function")
+  }
+  if (!file.exists(filename)) {
+    stop(paste("Can't file file:", filename))
+  }
+  type <- tolower(x = type[1L])
+  type <- match.arg(arg = type)
+  ratio <- getOption(x = "Seurat.input.sparse_ratio", default = 0.4)
+  p <- progressr::progressor()
+  p(message = "Preloading Akoya matrix", class = "sticky", 
+    amount = 0)
+  sep <- switch(EXPR = type, inform = "\t", ",")
+  mtx <- data.table::fread(file = filename, sep = sep, data.table = FALSE, 
+                           verbose = FALSE)
+  p(message = paste0("Parsing matrix in '", type, "' format"), 
+    class = "sticky", amount = 0)
+  outs <- switch(EXPR = type, processor = {
+    p(message = "Creating centroids coordinates", class = "sticky", 
+      amount = 0)
+    centroids <- data.frame(x = mtx[["x:x"]], y = mtx[["y:y"]], 
+                            cell = as.character(x = mtx[["cell_id:cell_id"]]), 
+                            stringsAsFactors = FALSE)
+    rownames(x = mtx) <- as.character(x = mtx[["cell_id:cell_id"]])
+    p(message = "Creating meta data", class = "sticky", 
+      amount = 0)
+    md <- mtx[, !grepl(pattern = "^cyc", x = colnames(x = mtx)), 
+              drop = FALSE]
+    colnames(x = md) <- vapply(X = strsplit(x = colnames(x = md), 
+                                            split = ":"), FUN = "[[", FUN.VALUE = character(length = 1L), 
+                               2L)
+    p(message = "Creating expression matrix", class = "sticky", 
+      amount = 0)
+    mtx <- mtx[, grepl(pattern = "^cyc", x = colnames(x = mtx)), 
+               drop = FALSE]
+    colnames(x = mtx) <- vapply(X = strsplit(x = colnames(x = mtx), 
+                                             split = ":"), FUN = "[[", FUN.VALUE = character(length = 1L), 
+                                2L)
+    if (!is.na(x = filter)) {
+      p(message = paste0("Filtering features with pattern '", 
+                         filter, "'"), class = "sticky", amount = 0)
+      mtx <- mtx[, !grepl(pattern = filter, x = colnames(x = mtx)), 
+                 drop = FALSE]
+    }
+    mtx <- t(x = mtx)
+    if ((sum(mtx == 0)/length(x = mtx)) > ratio) {
+      p(message = "Converting expression to sparse matrix", 
+        class = "sticky", amount = 0)
+      mtx <- as.sparse(x = mtx)
+    }
+    list(matrix = mtx, centroids = centroids, metadata = md)
+  }, inform = {
+    inform.quant <- tolower(x = inform.quant[1L])
+    inform.quant <- match.arg(arg = inform.quant)
+    expr.key <- c(mean = "Mean", total = "Total", min = "Min", 
+                  max = "Max", std = "Std Dev")[inform.quant]
+    expr.pattern <- "\\(Normalized Counts, Total Weighting\\)"
+    rownames(x = mtx) <- mtx[["Cell ID"]]
+    mtx <- mtx[, setdiff(x = colnames(x = mtx), y = "Cell ID"), 
+               drop = FALSE]
+    p(message = "Creating centroids coordinates", class = "sticky", 
+      amount = 0)
+    centroids <- data.frame(x = mtx[["Cell X Position"]], 
+                            y = mtx[["Cell Y Position"]], cell = rownames(x = mtx), 
+                            stringsAsFactors = FALSE)
+    p(message = "Creating meta data", class = "sticky", 
+      amount = 0)
+    cols <- setdiff(x = grep(pattern = expr.pattern, x = colnames(x = mtx), 
+                             value = TRUE, invert = TRUE), y = paste("Cell", 
+                                                                     c("X", "Y"), "Position"))
+    md <- mtx[, cols, drop = FALSE]
+    exprs <- data.frame(cols = grep(pattern = paste(expr.key, 
+                                                    expr.pattern), x = colnames(x = mtx), value = TRUE))
+    exprs$feature <- vapply(X = trimws(x = gsub(pattern = paste(expr.key, 
+                                                                expr.pattern), replacement = "", x = exprs$cols)), 
+                            FUN = function(x) {
+                              x <- unlist(x = strsplit(x = x, split = " "))
+                              x <- x[length(x = x)]
+                              return(gsub(pattern = "\\(|\\)", replacement = "", 
+                                          x = x))
+                            }, FUN.VALUE = character(length = 1L))
+    exprs$class <- tolower(x = vapply(X = strsplit(x = exprs$cols, 
+                                                   split = " "), FUN = "[[", FUN.VALUE = character(length = 1L), 
+                                      1L))
+    classes <- unique(x = exprs$class)
+    outs <- vector(mode = "list", length = length(x = classes) + 
+                     2L)
+    names(x = outs) <- c("matrix", "centroids", "metadata", 
+                         setdiff(x = classes, y = "entire"))
+    outs$centroids <- centroids
+    outs$metadata <- md
+    for (i in classes) {
+      p(message = paste("Creating", switch(EXPR = i, entire = "entire cell", 
+                                           i), "expression matrix"), class = "sticky", 
+        amount = 0)
+      df <- exprs[exprs$class == i, , drop = FALSE]
+      expr <- mtx[, df$cols]
+      colnames(x = expr) <- df$feature
+      if (!is.na(x = filter)) {
+        p(message = paste0("Filtering features with pattern '", 
+                           filter, "'"), class = "sticky", amount = 0)
+        expr <- expr[, !grepl(pattern = filter, x = colnames(x = expr)), 
+                     drop = FALSE]
+      }
+      expr <- t(x = expr)
+      if ((sum(expr == 0, na.rm = TRUE)/length(x = expr)) > 
+          ratio) {
+        p(message = paste("Converting", switch(EXPR = i, 
+                                               entire = "entire cell", i), "expression to sparse matrix"), 
+          class = "sticky", amount = 0)
+        expr <- as.sparse(x = expr)
+      }
+      outs[[switch(EXPR = i, entire = "matrix", i)]] <- expr
+    }
+    outs
+  }, qupath = {
+    rownames(x = mtx) <- as.character(x = seq_len(length.out = nrow(x = mtx)))
+    p(message = "Creating centroids coordinates", class = "sticky", 
+      amount = 0)
+    xpos <- sort(x = grep(pattern = "Centroid X", x = colnames(x = mtx), 
+                          value = TRUE), decreasing = TRUE)[1L]
+    ypos <- sort(x = grep(pattern = "Centroid Y", x = colnames(x = mtx), 
+                          value = TRUE), decreasing = TRUE)[1L]
+    centroids <- data.frame(x = mtx[[xpos]], y = mtx[[ypos]], 
+                            cell = rownames(x = mtx), stringsAsFactors = FALSE)
+    p(message = "Creating meta data", class = "sticky", 
+      amount = 0)
+    cols <- setdiff(x = grep(pattern = "Cell:.*mean", x = colnames(x = mtx),
+                             ignore.case = TRUE, value = TRUE, invert = TRUE),
+                    y = c(xpos, ypos))
+    md <- mtx[, cols, drop = FALSE]
+    p(message = "Creating expression matrix", class = "sticky", 
+      amount = 0)
+    idx <- which(x = grepl(pattern = "Cell:.*mean", x = colnames(x = mtx), 
+                           ignore.case = TRUE))
+    mtx <- mtx[, idx, drop = FALSE]
+    colnames(x = mtx) <- gsub(":| |/", ".", colnames(x = mtx))
+    if (!is.na(x = filter)) {
+      p(message = paste0("Filtering features with pattern '", 
+                         filter, "'"), class = "sticky", amount = 0)
+      mtx <- mtx[, !grepl(pattern = filter, x = colnames(x = mtx)), 
+                 drop = FALSE]
+    }
+    mtx <- t(x = mtx)
+    if ((sum(mtx == 0)/length(x = mtx)) > ratio) {
+      p(message = "Converting expression to sparse matrix", 
+        class = "sticky", amount = 0)
+      mtx <- as.sparse(x = mtx)
+    }
+    list(matrix = mtx, centroids = centroids, metadata = md)
+  }, stop("Unknown matrix type: ", type))
+  return(outs)
+}
+LoadAkoyaUpdate <- function (filename, type = c("inform", "processor", "qupath"),
+                             fov, assay = "Akoya", ...)
+{
+  data <- ReadAkoyaUpdate(filename = filename, type = type)
+  coords <- suppressWarnings(expr = CreateFOV(coords = data$centroids,
+                                              type = "centroids", key = "fov", assay = assay))
+  colnames(x = data$metadata) <- suppressWarnings(expr = make.names(names = colnames(x = data$metadata)))
+  obj <- CreateSeuratObject(counts = data$matrix, assay = assay,
+                            meta.data = data$metadata)
+  coords <- subset(x = coords, cells = Cells(x = obj))
+  suppressWarnings(expr = obj[[fov]] <- coords)
+  for (i in setdiff(x = names(x = data), y = c("matrix", "centroids",
+                                               "metadata"))) {
+    suppressWarnings(expr = obj[[i]] <- CreateAssayObject(counts = data[[i]]))
+  }
+  return(obj)
+}
+
+
+
+
+# File list and output object
+file_list <- c("1LB.csv", "3LB.csv", "6LB.csv","7LB.csv","9LB.csv", "11LB.csv","13LB.csv",
+               "15LB.csv","17LB.csv","19LB.csv","21LB.csv","23LB.csv","25LB.csv","27LB.csv",
+               "00075293.csv","00075292.csv","00075298.csv","7599_part2.csv")
+seurat_list <- list()
+
+# Main processing loop
+for (file in file_list) {
+  sample_name <- file_path_sans_ext(basename(file))
+
+  # Load and prepare Seurat object
+  seurat_obj <- LoadAkoyaUpdate(file, type = "qupath", fov = sample_name, assay = "RNA")
+
+
+  seurat_obj$sample <- sample_name  # Add sample name as metadata
+
+  # Rename cells uniquely
+  seurat_obj <- RenameCells(seurat_obj, add.cell.id = sample_name)
+
+  # Store in list
+  seurat_list[[sample_name]] <- seurat_obj
+
+
+}
+
+# Start with the first object
+merged_seurat <- seurat_list[[1]]
+
+# Loop through the rest and merge one by one
+for (i in 2:length(seurat_list)) {
+  message(paste("Merging object", i, "of", length(seurat_list)))
+  merged_seurat <- merge(
+    x = merged_seurat,
+    y = seurat_list[[i]],
+    project = "Merged"
+  )
+}
+
+
+
+save.image("union.Rdata")
+
+merged_seurat <- NormalizeData(merged_seurat, normalization.method = "CLR", margin = 2)
+merged_seurat <- ScaleData(merged_seurat)
+#VariableFeatures(merged_seurat) <- rownames(merged_seurat)
+merged_seurat= FindVariableFeatures(merged_seurat, assay = "RNA",  layer = "counts")
+
+format(object.size(merged_seurat), units = "Mb")
+#merged_seurat <- RunPCA(merged_seurat,npcs = 3, verbose = T)
+#merged_seurat <- FindNeighbors(merged_seurat, dims = 1:3)
+merged_seurat <- SketchData(
+  object = merged_seurat,
+  ncells = 5000,
+  method = "LeverageScore",
+  sketched.assay = "sketch",verbose=T)
