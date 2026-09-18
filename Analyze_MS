@@ -1,751 +1,159 @@
-# MS Proteomics Differential Analysis
 
-#
+DE_annotated<-read.csv("Ultimate_MS_table.csv")
 
-# Analysis workflow:
+library(ggplot2)
 
-# 1. Preprocess LFQ protein intensities
+DE_annotated$threshold <- as.factor(
+  abs(DE_annotated$logFC) > 0.58 & DE_annotated$P.Value < 0.05
+)
 
-# 2. Impute missing values using MinProb
 
-# 3. Perform PCA before and after adjustment for tumor percentage
+library(ggrepel)
 
-# 4. Differential analysis between complete responders (CR) and
+DE_annotated$regulation <- ifelse(
+  DE_annotated$logFC > 0.58, "Up",
+  ifelse(DE_annotated$logFC < -0.58, "Down", "NS")
+)
 
-# non-responders (NR) using limma
-
-# 5. Annotate differentially expressed proteins with predefined modules
-
-# 6. Generate volcano plots
-
-# 7. Perform GO Biological Process enrichment
-
-# 8. Perform Hallmark gene-set enrichment analysis (GSEA)
-
-#
-
-# Input objects expected in the R environment:
-
-# - lfq: protein x sample LFQ intensity matrix
-
-# - sampledata: sample metadata table
-
-#
-
-# Required columns in sampledata:
-
-# - Sample ID
-
-# - Responder
-
-# - Cohort
-
-# - TumorPercent
-
-#
-
-# Responder should contain the groups "CR" and "NR".
-
-#
-
-# -------------------------------------------------------------------------
-
-# 1. Load packages
-
-# -------------------------------------------------------------------------
-
-library(limma)
-library(imputeLCMD)
-library(dplyr)
-library(tidyr)
 library(ggplot2)
 library(ggrepel)
-library(clusterProfiler)
-library(org.Hs.eg.db)
-library(msigdbr)
 
-# -------------------------------------------------------------------------
-
-# 2. Output directory
-
-# -------------------------------------------------------------------------
-
-dir.create("results", showWarnings = FALSE)
-
-# -------------------------------------------------------------------------
-
-# 3. Prepare input data
-
-# -------------------------------------------------------------------------
-
-# Convert the LFQ matrix to numeric values.
-
-lfq<-read.table("MS_Proteomic_matrix.txt")
-lfq <- as.matrix(lfq)
-storage.mode(lfq) <- "numeric"
-
-# Keep only samples for which metadata are available.
-sampledata<-read.table("MS_Proteomic_sampledata.txt")
-sampledata <- sampledata[
-sampledata$Sample_ID %in% colnames(lfq),,drop = FALSE]
-
-# Reorder the LFQ matrix so that sample order exactly matches metadata.
-
-lfq <- lfq[, sampledata$Sample_ID , drop = FALSE]
-
-# -------------------------------------------------------------------------
-
-# 4. Missing-value imputation
-
-# -------------------------------------------------------------------------
-
-# Impute missing LFQ values using the MinProb method.
-
-# q = 0.01 corresponds to sampling from the lower tail of the
-
-# observed intensity distribution.
-
-lfq <- impute.MinProb(lfq, q = 0.01)
-
-# -------------------------------------------------------------------------
-
-# 5. Quality control: distribution of protein intensities
-
-# -------------------------------------------------------------------------
-
-pdf("results/01_LFQ_distribution.pdf", width = 10, height = 6)
-
-boxplot(
-log2(lfq),
-las = 2,
-main = "Log2 Protein Intensities",
-ylab = "Log2 Intensity"
-)
-
-dev.off()
-
-# -------------------------------------------------------------------------
-
-# 6. Define sample variables
-
-# -------------------------------------------------------------------------
-
-sampledata$Responder <- factor(
-sampledata$Responder,
-levels = c("NR", "CR")
-)
-
-sampledata$Cohort <- factor(sampledata$Cohort)
-
-sampledata$TumorPercent <- as.numeric(
-as.character(sampledata$TumorPercent)
-)
-
-# Create a categorical representation of tumor percentage for PCA
-
-# visualization only.
-
-sampledata$TumorPerc <- ifelse(
-sampledata$TumorPercent > 60,
-"High",
-"Low"
-)
-
-sampledata$TumorPerc <- factor(
-sampledata$TumorPerc,
-levels = c("Low", "High")
-)
-
-# -------------------------------------------------------------------------
-
-# 7. PCA before adjustment
-
-# -------------------------------------------------------------------------
-
-pca_before <- prcomp(
-t(lfq),
-scale. = FALSE
-)
-
-pca_df_before <- data.frame(
-PC1 = pca_before$x[, 1],
-PC2 = pca_before$x[, 2],
-Responder = sampledata$Responder,
-Cohort = sampledata$Cohort,
-Sample = sampledata$`Sample ID`,
-TumorPerc = sampledata$TumorPerc
-)
-
-# PCA colored by responder group
-
-p1 <- ggplot(
-pca_df_before,
-aes(PC1, PC2, color = Responder)
-) +
-geom_point(size = 3) +
-geom_text_repel(
-aes(label = Sample),
-size = 2.5,
-show.legend = FALSE
-) +
-coord_fixed() +
-theme_minimal(base_family = "Arial") +
-labs(
-title = "PCA before adjustment",
-x = "PC1",
-y = "PC2"
-)
-
-ggsave(
-"results/02_PCA_before_Responder.pdf",
-p1,
-width = 7,
-height = 6
-)
-
-# PCA colored by cohort
-
-p2 <- ggplot(
-pca_df_before,
-aes(PC1, PC2, color = Cohort)
-) +
-geom_point(size = 3) +
-geom_text_repel(
-aes(label = Sample),
-size = 2.5,
-show.legend = FALSE
-) +
-coord_fixed() +
-theme_minimal(base_family = "Arial") +
-labs(
-title = "PCA before adjustment",
-x = "PC1",
-y = "PC2"
-)
-
-ggsave(
-"results/03_PCA_before_Cohort.pdf",
-p2,
-width = 7,
-height = 6
-)
-
-# PCA colored by tumor percentage category
-
-p3 <- ggplot(
-pca_df_before,
-aes(PC1, PC2, color = TumorPerc)
-) +
-geom_point(size = 3) +
-geom_text_repel(
-aes(label = Sample),
-size = 2.5,
-show.legend = FALSE
-) +
-coord_fixed() +
-theme_minimal(base_family = "Arial") +
-labs(
-title = "PCA before adjustment",
-x = "PC1",
-y = "PC2"
-)
-
-ggsave(
-"results/04_PCA_before_TumorPercentage.pdf",
-p3,
-width = 7,
-height = 6
-)
-
-# -------------------------------------------------------------------------
-
-# 8. Differential analysis using limma
-
-# -------------------------------------------------------------------------
-
-# Tumor percentage is included as a continuous covariate in the model.
-
-#
-
-# The model estimates the CR vs NR effect while accounting for variation
-
-# associated with tumor percentage.
-
-design <- model.matrix(
-~ 0 + Responder + TumorPercent,
-data = sampledata
-)
-
-colnames(design) <- make.names(colnames(design))
-
-# Define the CR versus NR contrast.
-
-contrast_matrix <- makeContrasts(
-CRvsNR = ResponderCR - ResponderNR,
-levels = design
-)
-
-# Fit the linear model to the LFQ intensity matrix.
-
-fit <- lmFit(
-lfq,
-design
-)
-
-fit <- contrasts.fit(
-fit,
-contrast_matrix
-)
-
-fit <- eBayes(
-fit
-)
-
-# Extract all proteins.
-
-DE_results <- topTable(
-fit,
-coef = "CRvsNR",
-number = Inf,
-sort.by = "P"
-)
-
-DE_results$hgnc_symbol <- rownames(DE_results)
-
-# -------------------------------------------------------------------------
-
-# 9. Annotate differential proteins with predefined biological modules
-
-# -------------------------------------------------------------------------
-
-modules <- read.table(
-text = "
-Module	hgnc_symbol
-Anti-apoptotic	SERPINB3
-Anti-apoptotic	SERPINB4
-EMT activation	DSG3
-EMT activation	MUC5B
-EMT activation	COL7A1
-EMT activation	DUOX2
-EMT activation	TGM1
-Epidermis development	KRT4
-Epidermis development	KRT6A
-Epidermis development	KRT6B
-M2-like TAMs function	IL1RN
-M2-like TAMs function	ANXA1
-M2-like TAMs function	ANXA9
-M2-like TAMs function	FABP5
-M2-like TAMs function	CD109
-M2-like TAMs function	C1QBP
-Suppression of anti-tumor immunity	S100A2
-Suppression of anti-tumor immunity	LGALS7B
-Suppression of anti-tumor immunity	LGALS7
-Suppression of anti-tumor immunity	LY6D
-Suppression of anti-tumor immunity	CLIC3
-Suppression of anti-tumor immunity	S100A7
-Activation of anti-tumor immunity	XYLB
-Positive regulation of ferroptosis	DHCR7
-Cell adhesion	ITGA4
-Positive regulation of ferroptosis	HPCAL1
-Positive regulation of ferroptosis	DECR2
-Anti-angiogenic	THBS1
-EMT suppression	PARVB
-Positive regulation of ferroptosis	ANK1
-Activation of anti-tumor immunity	KPNA1
-Cell adhesion	ITGB3
-EMT suppression	FGA
-EMT suppression	B4GAT1
-EMT suppression	FGG
-Cell adhesion	ITGA2B
-Cell adhesion	FGB
-Activation of anti-tumor immunity	HMGCS2
-",
-header = TRUE,
-sep = "\t"
-)
-
-DE_annotated <- DE_results %>%
-left_join(
-modules,
-by = "hgnc_symbol"
-) %>%
-mutate(
-Module = factor(Module),
-sig = ifelse(
-P.Value < 0.05 & abs(logFC) > 1,
-"YES",
-"NO"
-)
-)
-
-write.table(
-DE_annotated,
-file = "results/MS_differential_analysis.txt",
-sep = "\t",
-quote = FALSE,
-row.names = FALSE
-)
-
-# -------------------------------------------------------------------------
-
-# 10. Volcano plot
-
-# -------------------------------------------------------------------------
+ggplot(DE_annotated, aes(x = logFC, y = -log10(P.Value))) +
+  
+  geom_point(aes(color = regulation), alpha = 0.7) +
+  
+  scale_color_manual(values = c(
+    "Up" = "#F8766D",
+    "Down" = "#00BFC4",
+    "NS" = "grey"
+  )) +
+  
+  geom_text_repel(
+    data = subset(DE_annotated, threshold == "TRUE"),
+    aes(label = hgnc_symbol),
+    size = 3,
+    max.overlaps = 15
+  )  +
+  
+  theme_minimal(base_family = "Arial") +
+  
+  theme(
+    legend.position = "none",
+    text = element_text(family = "Arial")
+  ) +
+  
+  labs(
+    x = "log2 Fold Change",
+    y = "-log10 P-value"
+  )
+
+library(dplyr)
+
+modules <- read.table(text = "
+Module\thgnc_symbol
+Anti-apoptotic\tSERPINB3
+Anti-apoptotic\tSERPINB4
+EMT activation\tDSG3
+EMT activation\tMUC5B
+EMT activation\tCOL7A1
+EMT activation\tDUOX2
+EMT activation\tTGM1
+Epidermis development\tKRT4
+Epidermis development\tKRT6A
+Epidermis development\tKRT6B
+M2-like TAMs function\tIL1RN
+M2-like TAMs function\tANXA1
+M2-like TAMs function\tANXA9
+M2-like TAMs function\tFABP5
+M2-like TAMs function\tCD109
+M2-like TAMs function\tC1QBP
+Suppression of anti-tumor immunity\tS100A2
+Suppression of anti-tumor immunity\tLGALS7B
+Suppression of anti-tumor immunity\tLGALS7
+Suppression of anti-tumor immunity\tLY6D
+Suppression of anti-tumor immunity\tCLIC3
+Suppression of anti-tumor immunity\tS100A7
+Activation of anti-tumor immunity\tXYLB
+Positive regulation of ferroptosis\tDHCR7
+Cell adhesion\tITGA4
+Positive regulation of ferroptosis\tHPCAL1
+Positive regulation of ferroptosis\tDECR2
+Anti-angiogenic\tTHBS1
+EMT suppression\tPARVB
+Positive regulation of ferroptosis\tANK1
+Activation of anti-tumor immunity\tKPNA1
+Cell adhesion\tITGB3
+EMT suppression\tFGA
+EMT suppression\tB4GAT1
+EMT suppression\tFGG
+Cell adhesion\tITGA2B
+Cell adhesion\tFGB
+Cell adhesion\tITGA4
+Activation of anti-tumor immunity\tHMGCS2
+", header = TRUE, sep = "\t")
+
+
+DE_annotated <- DE_annotated %>%
+  left_join(modules, by = "hgnc_symbol")
+
+DE_annotated$Module <- factor(DE_annotated$Module)
+
+DE_annotated <- DE_annotated %>%
+  mutate(
+    sig = ifelse(P.Value < 0.05 & abs(logFC) > 1, "YES", "NO")
+  )
+
+library(ggrepel)
+library(ggplot2)
 
 volcano_cols <- c(
-"#1F77B4",
-"#FF7F0E",
-"#2CA02C",
-"#D62728",
-"#9467BD",
-"#8C564B",
-"#E377C2",
-"#17BECF",
-"#7A750B",
-"#FB9A99"
+  "#1F77B4",  # blue
+  "#FF7F0E",  # orange
+  "#2CA02C",  # green
+  "#D62728",  # red
+  "#9467BD",  # purple (strong, visible)
+  "#8C564B",  # brown
+  "#E377C2",  # pink
+  "#17BECF",  # cyan
+  "#7A750B",  # olive yellow
+  "#FB9A99"   # grey (neutral fallback)
 )
 
-volcano <- ggplot(
-DE_annotated,
-aes(
-x = logFC,
-y = -log10(P.Value)
-)
-) +
-geom_point(
-color = "grey70",
-alpha = 0.6
-) +
-geom_point(
-data = subset(
-DE_annotated,
-sig == "YES" & !is.na(Module)
-),
-aes(color = Module),
-size = 2
-) +
-geom_vline(
-xintercept = c(-1, 1),
-linetype = "dashed"
-) +
-geom_hline(
-yintercept = -log10(0.05),
-linetype = "dashed"
-) +
-geom_text_repel(
-data = subset(
-DE_annotated,
-sig == "YES" & !is.na(Module)
-),
-aes(
-label = hgnc_symbol,
-color = Module
-),
-size = 3,
-max.overlaps = 20,
-show.legend = FALSE
-) +
-scale_color_manual(
-values = volcano_cols
-) +
-theme_minimal(
-base_family = "Arial"
-) +
-labs(
-x = "log2 Fold Change",
-y = "-log10 P-value",
-title = "MS differential analysis: CR vs NR"
-)
 
-ggsave(
-"results/05_Volcano_CR_vs_NR.pdf",
-volcano,
-width = 9,
-height = 7
-)
-
-# -------------------------------------------------------------------------
-
-# 11. GO Biological Process enrichment
-
-# -------------------------------------------------------------------------
-
-# Define the background universe as all proteins with a valid HGNC symbol.
-
-universe_genes <- unique(
-na.omit(DE_annotated$hgnc_symbol)
-)
-
-# -------------------------
-
-# Proteins increased in CR
-
-# -------------------------
-
-sig_genes_up <- DE_annotated %>%
-filter(
-logFC > 0.58,
-P.Value < 0.05,
-!is.na(hgnc_symbol)
-) %>%
-pull(hgnc_symbol) %>%
-unique()
-
-ego_up <- enrichGO(
-gene = sig_genes_up,
-universe = universe_genes,
-OrgDb = org.Hs.eg.db,
-ont = "BP",
-pAdjustMethod = "BH",
-pvalueCutoff = 0.05,
-qvalueCutoff = 0.05,
-keyType = "SYMBOL",
-readable = TRUE
-)
-
-write.table(
-as.data.frame(ego_up),
-file = "results/GO_BP_CR_up.txt",
-sep = "\t",
-quote = FALSE,
-row.names = FALSE
-)
-
-pdf("results/06_GO_BP_CR_up.pdf", width = 8, height = 6)
-
-print(
-dotplot(
-ego_up,
-showCategory = 10
-)
-)
-
-dev.off()
-
-# Simplify redundant GO terms.
-
-ego_up_simplified <- simplify(
-ego_up,
-cutoff = 0.7,
-by = "p.adjust",
-select_fun = min
-)
-
-pdf(
-"results/07_GO_BP_CR_up_simplified.pdf",
-width = 8,
-height = 6
-)
-
-print(
-dotplot(
-ego_up_simplified,
-showCategory = 10
-)
-)
-
-dev.off()
-
-# -------------------------
-
-# Proteins decreased in CR
-
-# -------------------------
-
-sig_genes_down <- DE_annotated %>%
-filter(
-logFC < -0.58,
-P.Value < 0.05,
-!is.na(hgnc_symbol)
-) %>%
-pull(hgnc_symbol) %>%
-unique()
-
-ego_down <- enrichGO(
-gene = sig_genes_down,
-universe = universe_genes,
-OrgDb = org.Hs.eg.db,
-ont = "BP",
-pAdjustMethod = "BH",
-pvalueCutoff = 0.05,
-qvalueCutoff = 0.05,
-keyType = "SYMBOL",
-readable = TRUE
-)
-
-write.table(
-as.data.frame(ego_down),
-file = "results/GO_BP_CR_down.txt",
-sep = "\t",
-quote = FALSE,
-row.names = FALSE
-)
-
-pdf("results/08_GO_BP_CR_down.pdf", width = 8, height = 6)
-
-print(
-dotplot(
-ego_down,
-showCategory = 10
-)
-)
-
-dev.off()
-
-ego_down_simplified <- simplify(
-ego_down,
-cutoff = 0.7,
-by = "p.adjust",
-select_fun = min
-)
-
-pdf(
-"results/09_GO_BP_CR_down_simplified.pdf",
-width = 8,
-height = 6
-)
-
-print(
-dotplot(
-ego_down_simplified,
-showCategory = 10
-)
-)
-
-dev.off()
-
-# -------------------------------------------------------------------------
-
-# 12. MSigDB Hallmark GSEA
-
-# -------------------------------------------------------------------------
-
-# Retrieve Hallmark gene sets for Homo sapiens.
-
-hallmark <- msigdbr(
-species = "Homo sapiens",
-category = "H"
-)
-
-term2gene <- hallmark %>%
-select(
-gs_name,
-gene_symbol
-) %>%
-distinct()
-
-# Prepare a ranked gene list using the limma log2 fold change.
-
-gene_list <- DE_annotated %>%
-filter(
-!is.na(logFC),
-!is.na(hgnc_symbol)
-) %>%
-select(
-hgnc_symbol,
-logFC
-) %>%
-distinct(hgnc_symbol, .keep_all = TRUE)
-
-gene_list <- gene_list$logFC %>%
-setNames(
-gene_list$hgnc_symbol
-) %>%
-sort(
-decreasing = TRUE
-)
-
-# Run preranked GSEA.
-
-gsea_res <- GSEA(
-geneList = gene_list,
-TERM2GENE = term2gene,
-verbose = FALSE,
-pvalueCutoff = 1
-)
-
-gsea_df <- as.data.frame(
-gsea_res
-)
-
-gsea_df <- gsea_df %>%
-mutate(
-sig = ifelse(
-qvalue < 0.05,
-"*",
-""
-)
-)
-
-write.table(
-gsea_df,
-file = "results/Hallmark_GSEA.txt",
-sep = "\t",
-quote = FALSE,
-row.names = FALSE
-)
-
-# -------------------------------------------------------------------------
-
-# 13. Hallmark GSEA visualization
-
-# -------------------------------------------------------------------------
-
-gsea_plot <- ggplot(
-gsea_df,
-aes(
-x = 1,
-y = ID,
-fill = NES
-)
-) +
-geom_tile(
-color = "white",
-linewidth = 0.3
-) +
-geom_text(
-aes(label = sig),
-size = 4,
-fontface = "bold"
-) +
-scale_fill_gradient2(
-low = "#2166AC",
-mid = "white",
-high = "#B2182B",
-midpoint = 0,
-name = "NES"
-) +
-theme_bw(
-base_family = "Arial"
-) +
-theme(
-axis.text.x = element_blank(),
-axis.ticks.x = element_blank(),
-axis.text.y = element_text(size = 7),
-axis.title = element_blank(),
-panel.grid = element_blank(),
-legend.title = element_text(face = "bold")
-) +
-labs(
-title = "Hallmark GSEA"
-)
-
-ggsave(
-"results/10_Hallmark_GSEA.pdf",
-gsea_plot,
-width = 8,
-height = 8
-)
-
-# -------------------------------------------------------------------------
-
-# 14. Session information
-
-# -------------------------------------------------------------------------
-
-writeLines(
-capture.output(
-sessionInfo()
-),
-"results/sessionInfo.txt"
-)
+ggplot(DE_annotated, aes(x = logFC, y = -log10(P.Value))) +
+  
+  # all points grey
+  geom_point(color = "grey70", alpha = 0.6) +
+  geom_point(
+    data = subset(DE_annotated, sig == "YES" & !is.na(Module)),
+    aes(color = Module),
+    size = 2
+  )+
+  
+  # significance threshold lines
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  
+  # labeled genes only
+  geom_text_repel(
+    data = subset(DE_annotated, sig == "YES" & !is.na(Module)),
+    aes(label = hgnc_symbol, color = Module),
+    size = 3,
+    max.overlaps = 20,
+    show.legend = FALSE
+  ) +
+  
+  scale_color_manual(values = volcano_cols) +
+  
+  theme_minimal(base_family = "Arial") +
+  
+  theme(
+    legend.position = "right",
+    text = element_text(family = "Arial")
+  ) +
+  
+  labs(
+    x = "log2 Fold Change",
+    y = "-log10 P-value",
+    title = "Volcano plot (MS differential expression)"
+  )
