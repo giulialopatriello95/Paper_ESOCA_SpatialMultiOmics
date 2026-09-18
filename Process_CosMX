@@ -1,0 +1,32 @@
+nano.obj2 <- LoadNanostring(data.dir = "/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/CosMX/test_aurora/R5630_Slide2", fov = "R5630_Slide2")
+nano.obj3 <- LoadNanostring(data.dir = "/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/CosMX/4_High_Res_FOV_FL_Image/R5630_Slide3/mesmer_nanostring_outs/R5630_Slide3", fov = "R5630_Slide3")
+nano.obj4 <- LoadNanostring(data.dir = "/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/CosMX/4_High_Res_FOV_FL_Image/R5630_Slide4/mesmer_nanostring_outs/R5630_Slide1", fov = "R5630_Slide1")
+
+
+nano.obj2[["nCountRNA"]] <- nano.obj2$nCount_Nanostring
+nano.obj2[["nFeature_RNA"]] <- nano.obj2$nFeature_Nanostring
+nano.obj3[["nCountRNA"]] <- nano.obj3$nCount_Nanostring
+nano.obj3[["nFeature_RNA"]] <- nano.obj3$nFeature_Nanostring
+nano.obj4[["nCountRNA"]] <- nano.obj4$nCount_Nanostring
+nano.obj4[["nFeature_RNA"]] <- nano.obj4$nFeature_Nanostring
+
+nano.obj2 <- subset(nano.obj2, subset = nFeature_RNA > 20 & nFeature_RNA < 2500)
+nano.obj3 <- subset(nano.obj3, subset = nFeature_RNA > 20 & nFeature_RNA < 2500)
+nano.obj4 <- subset(nano.obj4, subset = nFeature_RNA > 20 & nFeature_RNA < 2500)
+
+##############################3 MERGE
+nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj4), add.cell.ids = c("Slide2", "Slide3", "Slide4"))
+
+
+##############################4 CLUSTERING
+# standard preprocessing
+nano.obj.merge <- SCTransform(nano.obj.merge, assay = "Nanostring") %>%
+  RunPCA(npcs = 30, features = rownames(nano.obj.merge)) %>%
+  RunUMAP(dims = 1:30) %>%
+  FindNeighbors(reduction = "pca", dims = 1:30) %>%
+  FindClusters(resolution = 2)
+DefaultAssay(nano.obj.merge)<-"Nanostring"
+
+
+
+
