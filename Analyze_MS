@@ -167,3 +167,109 @@ ggplot(DE_annotated, aes(x = logFC, y = -log10(P.Value))) +
     y = "-log10 P-value",
     title = "Volcano plot (MS differential expression)"
   )
+
+
+
+DE_annotated<-read.csv("Ultimate_MS_table.csv")
+
+
+
+
+# Hallmark
+hallmark_df <- msigdbr(
+  species = "Homo sapiens",
+  category = "H"
+)
+
+bp_df <- msigdbr(
+  species = "Homo sapiens",
+  category = "C5",
+  subcategory = "GO:BP"
+)
+
+
+# Merge pathways
+pathways_df <- hallmark_df
+
+
+TERM2GENE <- pathways_df %>%
+  dplyr::select(gs_name, gene_symbol)
+
+
+
+
+DE_annotated <- DE_annotated %>%
+  tidyr::drop_na(logFC) %>%
+  tidyr::drop_na(hgnc_symbol)
+
+gene_list <- DE_annotated$logFC
+names(gene_list) <- DE_annotated$hgnc_symbol
+
+gene_list <- sort(gene_list, decreasing = TRUE)
+gene_list <- gene_list[
+  !duplicated(names(gene_list))
+] 
+
+gene_list <- gene_list[
+  !is.na(names(gene_list)) &
+    names(gene_list) != "" &
+    !is.na(gene_list) &
+    is.finite(gene_list)
+]
+gsea_res <- GSEA(
+  geneList = gene_list,
+  TERM2GENE = TERM2GENE,
+  verbose = FALSE,
+  pvalueCutoff = 1,minGSSize = 3
+)
+
+gsea_df<-gsea_res@result
+gsea_df$sig<-ifelse(gsea_df$qvalue<0.05,"*","")
+
+
+
+
+ggplot(
+  gsea_df,
+  aes(
+    x = 1,
+    y = ID,
+    fill = NES
+  )
+) +
+  geom_tile(
+    color = "white",
+    linewidth = 0.3
+  ) +
+  
+  geom_text(
+    aes(label = sig),
+    size = 4,
+    fontface = "bold"
+  ) +
+  
+  scale_fill_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "NES"
+  ) +
+  
+  theme_bw() + theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 12,
+      face = "bold"
+    ),
+    axis.text.y = element_text(size = 7),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5,
+      size = 16
+    ))
+
