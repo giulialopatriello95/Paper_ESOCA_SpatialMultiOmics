@@ -273,3 +273,72 @@ ggplot(
       size = 16
     ))
 
+
+
+library(dplyr)
+
+up_genes <- DE_annotated %>%
+  filter(logFC > 0.58, P.Value < 0.05) %>%
+  pull(hgnc_symbol) %>%
+  na.omit() %>%
+  unique()
+
+down_genes <- DE_annotated %>%
+  filter(logFC < -0.58, P.Value < 0.05) %>%
+  pull(hgnc_symbol) %>%
+  na.omit() %>%
+  unique()
+
+universe_genes <- DE_annotated %>%
+  pull(hgnc_symbol) %>%
+  na.omit() %>%
+  unique()
+
+
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+ego_up <- enrichGO(
+  gene          = up_genes,
+  universe      = universe_genes,
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP",
+  keyType       = "SYMBOL",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.05,
+  readable      = TRUE
+)
+
+ego_down <- enrichGO(
+  gene          = down_genes,
+  universe      = universe_genes,
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP",
+  keyType       = "SYMBOL",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.05,
+  readable      = TRUE
+)
+
+
+dotplot(ego_up, showCategory = 10)
+
+ego_simplified <- simplify(ego_up, 
+                           cutoff=0.7, 
+                           by="p.adjust", 
+                           select_fun=min)
+dotplot(ego_simplified, showCategory = 10)
+
+dotplot(ego_down, showCategory = 10)
+
+ego_simplified <- simplify(ego_down, 
+                           cutoff=0.7, 
+                           by="p.adjust", 
+                           select_fun=min)
+dotplot(ego_simplified, showCategory = 10)
+
+
+
