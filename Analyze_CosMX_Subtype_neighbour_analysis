@@ -1,0 +1,330 @@
+library(dplyr)
+library(Seurat)
+library(ks)
+library(InSituCor)
+#############################################
+library(magrittr)
+#######################################################
+subset_opt <- function(
+    object = NULL,
+    subset,
+    cells = NULL,
+    idents = NULL,
+    Update.slots = TRUE,
+    Update.object = TRUE,
+    ...)
+{
+  
+  if (Update.slots) {
+    message("Updating object slots..")
+    object %<>% UpdateSlots()
+  }
+  
+  message("Cloing object..")
+  obj_subset <- object
+  
+  # sanity check - use only cell ids (no indices)
+  if (all(is.integer(cells))) {
+    cells <- Cells(obj_subset)[cells]
+  }
+  
+  if (!missing(subset) || !is.null(idents)) {
+    message("Extracting cells matched to `subset` and/or `idents`")
+  }
+  
+  if (class(obj_subset) == "FOV") {
+    message("object class is `FOV` ")
+    cells <- Cells(obj_subset)
+  } else if (!class(obj_subset) == "FOV" && !missing(subset)) {
+    subset <- enquo(arg = subset)
+    # cells to keep in the object
+    cells <-
+      WhichCells(object = obj_subset,
+                 cells = cells,
+                 idents = idents,
+                 expression = subset,
+                 return.null = TRUE, ...)
+  } else if (!class(obj_subset) == "FOV" && !is.null(idents)) {
+    cells <-
+      WhichCells(object = obj_subset,
+                 cells = cells,
+                 idents = idents,
+                 return.null = TRUE, ...)
+  } else if (is.null(cells)) {
+    cells <- Cells(obj_subset)
+  }
+  
+  # added support for object class `FOV`
+  if (class(obj_subset) == "FOV") {
+    message("Matching cells for object class `FOV`..")
+    cells_check <- any(obj_subset %>% Cells %in% cells)
+  } else {
+    # check if cells are present in all FOV
+    message("Matching cells in FOVs..")
+    cells_check <-
+      lapply(Images(obj_subset) %>% seq,
+             function(i) {
+               any(obj_subset[[Images(obj_subset)[i]]][["centroids"]] %>% Cells %in% cells)
+             }) %>% unlist
+  }
+  
+  if (all(cells_check)) {
+    message("Cell subsets are found in all FOVs!", "\n",
+            "Subsetting object..")
+    obj_subset %<>% base::subset(cells = cells, idents = idents, ...)
+  } else {
+    # if cells are present only in one or several FOVs:
+    # subset FOVs
+    fovs <-
+      lapply(Images(obj_subset) %>% seq, function(i) {
+        if (any(obj_subset[[Images(obj_subset)[i]]][["centroids"]] %>% Cells %in% cells)) {
+          message("Cell subsets are found only in FOV: ", "\n", Images(obj_subset)[i])
+          message("Subsetting Centroids..")
+          base::subset(x = obj_subset[[Images(obj_subset)[i]]], cells = cells, idents = idents, ...)
+        }
+      })
+    # replace subsetted FOVs, and remove FOVs with no matching cells
+    message("Removing FOVs where cells are NOT found: ", "\n",
+            paste0(Images(object)[which(!cells_check == TRUE)], "\n"), "\n",
+            "Subsetting cells..")
+    for (i in fovs %>% seq) { obj_subset[[Images(object)[i]]] <- fovs[[i]] }
+    
+  }
+  
+  # subset final object
+  obj_subset %<>% base::subset(cells = cells, ...)
+  
+  if (Update.object && !class(obj_subset) == "FOV") {
+    message("Updating object..")
+    obj_subset %<>% UpdateSeuratObject() }
+  
+  message("Object is ready!")
+  return(obj_subset)
+  
+}
+
+
+
+top_N_column_names <- function(data, N) {
+  top_names <- apply(data, 1, function(row) {
+    sorted_indices <- order(row, decreasing = TRUE)
+    top_indices <- sorted_indices[1:N]
+    colnames(data)[top_indices]
+  })
+  return(top_names)
+}
+
+top_N_column_names_new <- function(data, N) {
+  apply(data, 1, function(row) {
+    colnames(data)[order(row, decreasing = TRUE)][seq_len(N)]
+  })
+}
+
+
+count_neighbors <- function(top_neighbors, b_names) {
+  sapply(top_neighbors, function(neigh) {
+    sum(neigh %in% b_names)
+  })
+}
+
+report_column_names <- function(data, element) {
+  cols_with_element <- apply(data, 2, function(col) {
+    any(col == element)
+  })
+  return(colnames(data)[cols_with_element])
+}
+
+
+
+
+
+
+load("micronicchie.Rdata")
+library(dplyr)
+nano.obj.merge$manualannot[nano.obj.merge$manualannot=="Bcellplasmablast"]<-"Bcells_plasmacells"
+nano.obj.merge$manualannot[nano.obj.merge$manualannot=="unknown"]<-"granulocytes"
+nano.obj.merge$manualannot[nano.obj.merge$manualannot=="DC"]<-"dendritic cells"
+nano.obj.merge$manualannot[nano.obj.merge$manualannot=="SMC"]<-"smooth muscle cells"
+nano.obj.merge$curatedannot<-nano.obj.merge$manualannot
+
+
+nano.obj.merge$fov<-paste(nano.obj.merge$patient,nano.obj.merge$Fov)
+
+FIBRO<-subset(nano.obj.merge,manualannot %in% c("macrophages"))
+seurat_object2 <- SCTransform(FIBRO, assay = "Nanostring", verbose = FALSE) %>%
+  RunPCA(npcs = 30, verbose = FALSE) %>%
+  RunUMAP(dims = 1:30, verbose = FALSE) %>%
+  FindNeighbors(reduction = "pca", dims = 1:30) %>%
+  FindClusters(resolution = 2.5)
+seurat_object2$micro<-"epithelia"
+seurat_object2$micro[seurat_object2$niches %in% c("12","13","9")]<-"tumor niches"
+seurat_object2$micro[seurat_object2$niches %in% c("6","10","4","1")]<-"tumor niches"
+seurat_object2$micro[seurat_object2$niches %in% c("14","8","11","5")]<-"stromal niches"
+seurat_object2_t<-subset(seurat_object2,micro!="epithelia")
+#seurat_object2_t<-subset(seurat_object2_t,micro!="stromal niches")
+seurat_object2 <- SCTransform(seurat_object2_t, assay = "Nanostring", verbose = FALSE) %>%
+  RunPCA(npcs = 30, verbose = FALSE) %>%
+  RunUMAP(dims = 1:30, verbose = FALSE) %>%
+  FindNeighbors(reduction = "pca", dims = 1:30) %>%
+  FindClusters(resolution =1.8)
+#primaera a 2
+
+
+seurat_object2$type<-"undetermined"
+seurat_object2$type[Idents(seurat_object2)  %in% c("0","4","5","6","11")]<-"LATAM"
+seurat_object2$type[Idents(seurat_object2)  %in% c("7","15")]<-"M1like"
+seurat_object2$type[Idents(seurat_object2)  %in% c("16")]<-"IFNTAM"
+seurat_object2$type[Idents(seurat_object2)  %in% c("10","14")]<-"InflamTAM"
+seurat_object2$type[Idents(seurat_object2)  %in% c("9")]<-"ProlifTAM"
+seurat_object2$type[Idents(seurat_object2)  %in% c("13","17")]<-"TIMS"
+seurat_object2$type[Idents(seurat_object2)  %in% c("2","8","12","18")]<-"angioTAM"
+seurat_object2$type[Idents(seurat_object2)  %in% c("1","3")]<-"RegTAM"
+
+
+Idents(seurat_object2)<-seurat_object2$type
+
+nano.obj.merge<-subset(nano.obj.merge,niches %in% c("12","13","9","6","10","4","1","8","5","11","14"))
+#nano.obj.merge<-subset(nano.obj.merge,niches %in% c("12","13","9","6","10","4","1"))
+
+for (cluster in unique(Idents(seurat_object2))){
+  selected_cells<-rownames(seurat_object2@meta.data[Idents(seurat_object2)==cluster,])
+  nano.obj.merge$manualannot[rownames(nano.obj.merge@meta.data) %in% selected_cells]<-paste("Cluster",cluster,sep="")
+  
+}
+
+
+##################################
+library(dplyr)
+library(Seurat)
+library(magrittr)
+library(InSituCor)
+library(ks)
+
+
+
+# ===============================
+# 3. Main patient processing function
+# ===============================
+process_patient <- function(CosMX, patient_id, radius = 0.05, k = 50, top_n = 20) {
+  message("Processing patient: ", patient_id)
+  
+  seurat_object <- subset_opt(CosMX, fov == patient_id)
+  annot <- seurat_object@meta.data
+  norm <- t(as.matrix(seurat_object@assays$Nanostring$counts))
+  xy <- GetTissueCoordinates(seurat_object) %>%
+    mutate(x = x - min(x), y = y - min(y)) %>%
+    select(x, y)
+  rownames(xy) <- Cells(seurat_object)
+  
+  # Spatial graph
+  neighbors <- InSituCor:::radiusBasedGraph(x = xy$x, y = xy$y, R = radius, subset = 1)
+  
+  # Spatial correlation
+  step1 <- calcSpatialCor(
+    counts = norm, conditionon = annot[, c("nCount_Nanostring", "manualannot")],
+    neighbors = NULL, xy = xy, k = k, roundcortozero = 0.1, max_cells = 10000
+  )
+  
+  # All celltype pairs
+  celltypes <- unique(as.character(seurat_object$manualannot))
+  feat_pairs <- expand.grid(A = celltypes, B = celltypes)
+  feat_pairs <- feat_pairs %>%
+    filter(!(A %in% c("basal_squamous", "mature_squamous") & grepl("Cluster", A))) %>%
+    filter(!B %in% c("basal_squamous", "mature_squamous"))
+  
+  results <- lapply(seq_len(nrow(feat_pairs)), function(i) {
+    a <- feat_pairs$A[i]; b <- feat_pairs$B[i]
+    a_names <- rownames(annot[annot$manualannot == a, ])
+    b_names <- rownames(annot[annot$manualannot == b, ])
+    
+    if (length(a_names) == 0 || length(b_names) == 0) {
+      return(data.frame(a = a, b = b, c = 0, patient = patient_id))
+    }
+    f <- reshape2::melt(as.matrix(step1$neighbors[a_names, b_names, drop = FALSE]))
+    colnames(f) <- c("cellA", "cellB", "correlation")
+    f$a <- a
+    f$b <- b
+    # f <- f[f$correlation > 0, ]
+    top_k <- top_N_column_names_new(step1$neighbors[a_names, , drop = FALSE], top_n)
+    if (length(top_k) == 0) {
+      m <- 0
+    } else {
+      #result <- report_column_names(top_10, b_names)
+      per_cell_counts <- count_neighbors(top_k, b_names)
+      print(class(per_cell_counts))
+      #top_k sometimes returns fewer elements (e.g., due to filtering or sparse data)
+      #In that case, you’d be dividing by 20 even if a cell only had, say, 12 neighbors → biases your result
+      #m <- mean(per_cell_counts / lengths(top_k), na.rm = TRUE)
+      #per_cell_counts<-per_cell_counts[per_cell_counts>0]
+      #m <- mean(per_cell_counts)
+      # define B/plasma cells
+      selected_cells<-paste("Cluster",unique(seurat_object2$type),sep="")
+      selected_cells<-c(selected_cells,"macrophages")
+      selected_cells<- selected_cells[!selected_cells %in% c("M1like")]
+      bp_cells <- rownames(annot[annot$manualannot %in% selected_cells, ])
+      
+      # denominator: count only B/plasma neighbors per cell
+      bp_neighbor_counts <- sapply(top_k, function(neigh) {
+        sum(neigh %in% bp_cells)
+      })
+      
+      # avoid division by zero
+      valid <- bp_neighbor_counts > 0
+      
+      m <- mean(per_cell_counts[valid] / bp_neighbor_counts[valid], na.rm = TRUE)
+      
+    }
+    
+    # if (nrow(f) == 0) {
+    #   return(data.frame(a = a, b = b, c = NA, patient = patient_id))
+    # }
+    # 
+    
+    data.frame(a = a, b = b, c = m, patient = patient_id)
+  })
+  
+  do.call(rbind, results)
+}
+
+# ===============================
+# 4. Run the pipeline for all patients
+# ===============================
+patients <- unique(nano.obj.merge$fov)
+
+all_results <- lapply(patients, function(pid) process_patient(nano.obj.merge, pid)) %>%
+  bind_rows()
+save.image("prova_TAM_v2.Rdata")
+
+
+library(dplyr)
+library(ggpubr)
+load("prova_TAM_v2.Rdata")
+all_select<-all_results[grepl("Cluster",all_results$b),]
+#all_select<-all_select[!grepl("Cluster",all_select$b),]
+
+all_select$condition<-"NR"
+all_select$condition[grepl("52010783",all_select$patient)]<-"CR"
+all_select$condition[grepl("21-I-11612B",all_select$patient)]<-"CR"
+all_select$condition[grepl("20-I-14014",all_select$patient)]<-"CR"
+all_select$c<-as.numeric(all_select$c)
+colnames(all_select)<-c("cluster","cell_type","num_cell_incontact","patient","condition")
+all_select<-all_select[all_select$cluster=="tumor",]
+
+all_select <- all_select %>%
+  group_by(cluster) %>%
+  mutate(z_var = as.numeric(scale(num_cell_incontact))) %>%
+  ungroup()
+library(ggpubr)
+all_select$cell_type<-gsub("Cluster","",all_select$cell_type)
+all_select$cell_type<-factor(all_select$cell_type,levels=sort(unique(all_select$cell_type)))
+ggboxplot(
+  all_select,
+  x = "cell_type",
+  y = "num_cell_incontact",
+  # facet.by = "cluster",
+  add = "jitter",
+  color = "condition"
+) + theme_pubr(base_size = 14, base_family = "Arial")+
+  theme(axis.text.x = element_text(angle=90,hjust=1))+
+  ylab("Proportion of 20 neighbours")+xlab("Cluster")+
+stat_compare_means(aes(group = condition), method = "t.test",label = "p.format")
