@@ -1,0 +1,151 @@
+# MS Proteomics Differential Analysis
+
+#
+
+# Analysis workflow:
+
+# 1. Preprocess LFQ protein intensities
+
+# 2. Impute missing values using MinProb
+
+# 3. Perform PCA before and after adjustment for tumor percentage
+
+# 4. Differential analysis between complete responders (CR) and
+
+# non-responders (NR) using limma
+
+# 5. Annotate differentially expressed proteins with predefined modules
+
+# 6. Generate volcano plots
+
+# 7. Perform GO Biological Process enrichment
+
+# 8. Perform Hallmark gene-set enrichment analysis (GSEA)
+
+#
+
+# Input objects expected in the R environment:
+
+# - lfq: protein x sample LFQ intensity matrix
+
+# - sampledata: sample metadata table
+
+#
+
+# Required columns in sampledata:
+
+# - Sample ID
+
+# - Responder
+
+# - Cohort
+
+# - TumorPercent
+
+#
+
+# Responder should contain the groups "CR" and "NR".
+
+#
+
+# -------------------------------------------------------------------------
+
+# 1. Load packages
+
+# -------------------------------------------------------------------------
+
+library(limma)
+library(imputeLCMD)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggrepel)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(msigdbr)
+
+# -------------------------------------------------------------------------
+
+# 2. Output directory
+
+
+
+# -------------------------------------------------------------------------
+
+# 3. Prepare input data
+
+# -------------------------------------------------------------------------
+
+# Convert the LFQ matrix to numeric values.
+lfq<-read.table("MS_Proteomic_matrix.txt")
+lfq <- as.matrix(lfq)
+storage.mode(lfq) <- "numeric"
+
+# Keep only samples for which metadata are available.
+sampledata<-read.table("MS_Proteomic_sampledata.txt")
+sampledata <- sampledata[
+sampledata$Sample_ID %in% colnames(lfq),,drop = FALSE]
+
+# Reorder the LFQ matrix so that sample order exactly matches metadata.
+
+lfq <- lfq[, sampledata$Sample_ID , drop = FALSE]
+
+# Save the processed input objects.
+
+# -------------------------------------------------------------------------
+
+# 4. Missing-value imputation
+
+# -------------------------------------------------------------------------
+
+# Impute missing LFQ values using the MinProb method.
+
+# q = 0.01 corresponds to sampling from the lower tail of the
+
+# observed intensity distribution.
+
+lfq <- impute.MinProb(lfq, q = 0.01)
+
+# -------------------------------------------------------------------------
+
+# 5. Quality control: distribution of protein intensities
+
+# -------------------------------------------------------------------------
+design <- model.matrix(
+  ~ 0 + Responder + TumorPercent,
+  data = sampledata
+)
+
+colnames(design) <- make.names(colnames(design))
+
+# Define the CR versus NR contrast.
+
+contrast_matrix <- makeContrasts(
+  CRvsNR = ResponderCR - ResponderNR,
+  levels = design
+)
+
+# Fit the linear model to the LFQ intensity matrix.
+
+fit <- lmFit(
+  lfq,
+  design
+)
+
+fit <- contrasts.fit(
+  fit,
+  contrast_matrix
+)
+
+fit <- eBayes(
+  fit
+)
+
+# Extract all proteins.
+
+DE_results <- topTable(
+  fit,
+  coef = "CRvsNR",
+  number = Inf,
+  sort.by = "P"
+)
