@@ -80,37 +80,18 @@ dir.create("results", showWarnings = FALSE)
 
 # Convert the LFQ matrix to numeric values.
 
+lfq<-read.table("MS_Proteomic_matrix.txt")
 lfq <- as.matrix(lfq)
 storage.mode(lfq) <- "numeric"
 
 # Keep only samples for which metadata are available.
-
+sampledata<-read.table("MS_Proteomic_sampledata.txt")
 sampledata <- sampledata[
-sampledata$`Sample ID` %in% colnames(lfq),
-,
-drop = FALSE
-]
+sampledata$Sample_ID %in% colnames(lfq),,drop = FALSE]
 
 # Reorder the LFQ matrix so that sample order exactly matches metadata.
 
-lfq <- lfq[, sampledata$`Sample ID`, drop = FALSE]
-
-# Save the processed input objects.
-
-write.table(
-sampledata,
-file = "results/MS_Proteomic_sampledata.txt",
-sep = "\t",
-quote = FALSE,
-row.names = FALSE
-)
-
-write.table(
-lfq,
-file = "results/MS_Proteomic_matrix.txt",
-sep = "\t",
-quote = FALSE
-)
+lfq <- lfq[, sampledata$Sample_ID , drop = FALSE]
 
 # -------------------------------------------------------------------------
 
