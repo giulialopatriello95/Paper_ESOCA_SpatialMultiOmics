@@ -1,0 +1,1500 @@
+#setwd("/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/GeoMX_IRST")
+setwd("~/GeoMX/GeoMX_IRST")
+
+
+# Set your root directory (the top-level folder containing subdirectories with DCC files)
+root_dir <- "~/GeoMX/GeoMX_IRST"
+
+# Recursively list all DCC files in the root directory and its subdirectories
+dcc_files <- list.files(path = root_dir, pattern = "\\.dcc$", full.names = TRUE, recursive = TRUE)
+
+# Function to extract and parse <Code_Summary> content into a data frame
+extract_code_summary <- function(file) {
+  # Read all lines from the file
+  lines <- readLines(file)
+  
+  # Find the lines containing <Code_Summary> and </Code_Summary>
+  start <- grep("<Code_Summary>", lines)
+  end <- grep("</Code_Summary>", lines)
+  
+  # Extract the lines between the tags
+  if (length(start) > 0 && length(end) > 0 && start < end) {
+    content <- lines[(start + 1):(end - 1)]  # Exclude the tags themselves
+    
+    # Convert content into a data frame assuming "probe counts" are tab-separated
+    content_df <- read.table(text = content, header = FALSE, sep = ",",
+                             col.names = c("Probe", "Counts"), stringsAsFactors = FALSE)
+    return(content_df)
+  } else {
+    return(data.frame(Probe = character(), Counts = numeric()))  # Empty data frame
+  }
+}
+
+# Step 1: Extract data from all DCC files
+code_summary_list <- lapply(dcc_files, extract_code_summary)
+
+# Step 2: Get all unique probes across all files
+all_probes <- unique(unlist(lapply(code_summary_list, function(x) x$Probe)))
+
+# Step 3: Initialize a matrix to store counts
+count_matrix <- matrix(0, nrow = length(all_probes), ncol = length(dcc_files),
+                       dimnames = list(all_probes, basename(dcc_files)))
+
+# Step 4: Populate the matrix with counts
+for (i in seq_along(dcc_files)) {
+  file_data <- code_summary_list[[i]]
+  if (nrow(file_data) > 0) {
+    # Match probes and update counts
+    count_matrix[file_data$Probe, i] <- file_data$Counts
+  }
+}
+
+# View the resulting matrix
+print(count_matrix)
+
+# Optionally, save the matrix as a CSV file
+write.csv(count_matrix, file = "combined_code_summary_matrix.csv", row.names = TRUE)
+
+df<-read.delim("sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+colnames(count_matrix)<-gsub(".dcc","",colnames(count_matrix))
+intersect(df$FastqID,colnames(count_matrix))
+#chi è CR e NR
+df$Condition<-"NR"
+df$Condition[df$ID_Sample_Slide_ID %in% c("01A-0485","01A-0481","01A-0523")]<-"CR"
+
+#convert in matrice di geni
+probe<-read.delim("new_probelist.txt",header = F)
+
+count_matrix<-count_matrix[intersect(rownames(count_matrix),probe$V2),]
+probe<-probe[probe$V2 %in% intersect(rownames(count_matrix),probe$V2),]
+rownames(count_matrix)<-probe$V1
+exon_sample_matrix<-count_matrix
+
+gene_ids<- ifelse(grepl("NegativeProbe", rownames(exon_sample_matrix)), rownames(exon_sample_matrix), sub("_.*", "", rownames(exon_sample_matrix)))
+sum(grepl("NegativeProbe",gene_ids))
+gene_sample_matrix<-rowsum(exon_sample_matrix, gene_ids)
+
+
+
+write.csv(gene_sample_matrix, file = "gene_matrix.csv", row.names = TRUE)
+
+########################
+########################
+library(dplyr)
+library(tidyr)
+library(edgeR)
+library(DESeq2)
+`%nin%` = Negate(`%in%`)
+
+df<-read.delim("new_sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+df$Area<-as.numeric(gsub(",",".",df$Area))
+descr<-read.delim("descr_ROI.txt")
+descr$FastqID<-gsub("=.*","",descr$FastqID)
+descr$FastqID<-gsub(" ","",descr$FastqID)
+df<-merge(df,descr,by.x="FastqID",by.y="FastqID")
+df$Condition<-"NR"
+df$N_samples_istologico[df$N_samples_istologico %in% c("C1826515","C1826516","C1826517",
+                                                       "C1826518","C1826519","C1826520","C1826521","C1826522",
+                                                       "C1826523","C1826524","C1826525","C1826526","C1826527",
+                                                       "C1826528","C1826529","C1826530","C1826531","C1826532",
+                                                       "C1826533","C1826534","C1826535")]<-"C1826514"
+
+df$Condition[df$N_samples_istologico  %in% c("C1624423","C1624291","C1632599",
+                                             "24-I-00321"," 21-I-11612","18-06411",
+                                             "20-10783")]<-"CR"
+df$Batch<-"OSR"
+df$Batch[df$N_samples_istologico %in% c("C1622274","C1624291","C1624423","C1628347","C1624909","C1631077","C1632599","C1826514","C1826515",
+                                        "C1826516","C1826517","C1826518","C1826519","C1826520","C1826521","C1826522",
+                                        "C1826523","C1826524","C1826525","C1826526","C1826527","C1826528","C1826529",
+                                        "C1826530","C1826531","C1826532","C1826533","C1826534","C1826535")]<-"FREGAT"
+
+df$FastqID<-gsub(" ","",df$FastqID)
+df<-df[df$FastqID  %nin% c("DSP-1001660035811-E-A06","DSP-1001660035811-E-A09",
+                           "DSP-1001660035811-E-B08",
+                           "DSP-1001660035811-E-F07","DSP-1001660035811-E-F08",
+                           "DSP-1001660035811-E-G07","DSP-1001660035811-E-G10",
+                           "DSP-1001660035812-F-B09","DSP-1001660035812-F-B10",
+                           "DSP-1001660035812-F-B11","DSP-1001660035812-F-C03",
+                           "DSP-1001660035812-F-C04","DSP-1001660035812-F-C05",
+                           #                           "DSP-1001660035812-F-C06",
+                           #                           "DSP-1001660035812-F-C07",
+                           "DSP-1001660035812-F-E09",
+                           "DSP-1001660035812-F-G09",
+                           "DSP-1001660012001-B-E12",
+                           "DSP-1001660016058-C-E09",
+                           "DSP-1001660016058-C-E10",
+                           #                           "DSP-1001660016057-D-B07",
+                           #                           "DSP-1001660016057-D-B08",
+                           #                           "DSP-1001660016057-D-B09",
+                           "DSP-1001660016057-D-C11",
+                           "DSP-1001660016057-D-D06",
+                           "DSP-1001660016057-D-D07",
+                           "DSP-1001660016057-D-E06",
+                           "DSP-1001660016057-D-E07",
+                           "DSP-1001660016057-D-E08",
+                           "DSP-1001660016057-D-E09",
+                           "DSP-1001660016057-D-E10",
+                           "DSP-1001660016057-D-E11",
+                           "DSP-1001660035811-E-F06","DSP-1001660035811-E-F12","DSP-1001660016057-D-D12","DSP-1001660016057-D-E01"),]                      
+
+
+df<-df[df$Segment_Name!="NCT",]
+
+
+gene_sample_matrix<-gene_sample_matrix[,df$FastqID]
+
+
+df$merge<-""
+df$merge[df$Segment_Name %in% c("LINFOCITI", "MACROFAGI")] <- paste("STROMA",paste(df$ID_Sample_Slide_ID[df$Segment_Name %in% c("LINFOCITI", "MACROFAGI")], df$ROI[df$Segment_Name %in% c("LINFOCITI", "MACROFAGI")]))
+df$merge[df$Segment_Name %in% c("TUMORE")] <- paste("TUMORE",paste(df$ID_Sample_Slide_ID[df$Segment_Name %in% c("TUMORE")] , df$ROI[df$Segment_Name %in% c("TUMORE")] ))
+
+group_vector<-df$merge
+counts_t <- as.data.frame(t(gene_sample_matrix))
+counts_t$Group <- group_vector
+
+# Aggregate by group
+merged_counts <- aggregate(. ~ Group, data = counts_t, FUN = sum)
+
+# Transpose back to original format
+merged_counts <- as.data.frame(t(merged_counts[-1]))
+colnames(merged_counts) <- merged_counts[1,]
+merged_counts <- merged_counts[-1,]
+print(merged_counts)
+
+dim(merged_counts)
+colnames(merged_counts)<-unique(df$merge)
+gene_sample_matrix<-merged_counts
+
+
+df<-df[,-c(1:3)]
+df$Segment_Name[grepl("STROMA",df$merge)]<-"STROMA"
+df$Segment_Name[grepl("TUMORE",df$merge)]<-"TUMORE"
+df<-df %>%
+  group_by(ID_Sample_Slide_ID,N_samples_istologico,Condition,Segment_Name,
+           Batch,ROI,merge) %>%
+  summarise(sumArea=sum(as.numeric(Area)),sumNuclei=sum(as.numeric(Nuclei)))
+
+
+df$Area<-df$sumArea
+df$Nuclei<-df$sumNuclei
+
+
+
+
+df<-df[df$Segment_Name=="STROMA",]
+Replica.FREGAT<-nrow(df[df$Batch=="FREGAT",])
+Replica.OSR<-nrow(df[df$Batch=="OSR",])
+df<-df[df$Batch=="OSR",]
+#df<-df[df$ID_Sample_Slide_ID!="75299 (#4)",]
+gene_sample_matrix<-merged_counts[,df$merge]
+
+data <- as.integer(as.matrix(gene_sample_matrix))
+
+# Convert to integer matrix
+integer_matrix <- apply(gene_sample_matrix, c(1, 2), as.integer)
+
+# Maintain row and column names
+rownames(integer_matrix) <- rownames(gene_sample_matrix)
+colnames(integer_matrix) <- colnames(gene_sample_matrix)
+
+data<-integer_matrix
+
+#corrected_matrix <- removeBatchEffect(data,batch=df$N_samples_istologico,group=df$Condition)
+#data<-corrected_matrix
+#data[!is.finite(data)]<-0
+
+# Normalization function row gene and col sample
+normalized_matrix <- function(data,df) {
+  
+  #Negative probes
+  negative_probes <- data[grepl("Neg",rownames(data)),]
+  geo_means <- apply(negative_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  negativeprobes_normalized_matrix <- sweep(data, 2, geo_means, "/")
+  
+  #Housekeeping
+  housekeeping_probes <- data[rownames(data) %in% c("ACTB","GAPDH","RPLPO",
+                                                    "B2M","HPRT1","TBP","PPIA",
+                                                    "TUBB","SDHA","EIF4A1"),]
+  housekeeping_geo_means <- apply(housekeeping_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  housekeeping_normalized_matrix <- sweep(data, 2, housekeeping_geo_means, "/")
+  
+  # CPM Normalization
+  cpm_matrix <- cpm(data)
+  cpm_matrix_negprobes<- sweep(cpm_matrix, 2, geo_means, "/")
+  cpm_matrix_housekeeping<- sweep(cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #LOG CPM Normalization
+  log_cpm_matrix <- log2(cpm_matrix + 1)
+  log_cpm_matrix_negprobes<- sweep(log_cpm_matrix, 2, geo_means, "/")
+  log_cpm_matrix_housekeeping<- sweep(log_cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #TMM Normalization 
+  dge <- DGEList(counts = data)
+  dge <- calcNormFactors(dge, method = "TMM")
+  tmm_matrix <- cpm(dge)
+  tmm_matrix_negprobes<- sweep(tmm_matrix, 2, geo_means, "/")
+  tmm_matrix_housekeeping<- sweep(tmm_matrix, 2, housekeeping_geo_means, "/")  
+  
+  
+  #QUANTILE
+  quantile_matrix<-normalizeBetweenArrays(data, method = "quantile")
+  quantile_matrix_negprobes<- sweep(quantile_matrix, 2, geo_means, "/")
+  quantile_matrix_housekeeping<- sweep(quantile_matrix, 2, housekeeping_geo_means, "/")  
+  
+  #THIRD QUANTILE
+  q3_values <- apply(data,2,quantile, probs = 0.75)
+  q3_matrix <- sweep(data, 2, q3_values, "/")
+  q3_matrix[!is.finite(q3_matrix)] <- 0
+  q3_matrix_negprobes<- sweep(q3_matrix , 2, geo_means, "/")
+  q3_matrix_housekeeping<- sweep(q3_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #AREA
+  area_values <- df$Area
+  area_matrix <- sweep(data, 2, area_values, "/")
+  area_matrix[!is.finite(area_matrix)] <- 0
+  area_matrix_negprobes<- sweep(area_matrix , 2, geo_means, "/")
+  area_matrix_housekeeping<- sweep(area_matrix , 2, housekeeping_geo_means, "/")
+  
+  #NUCLEI
+  nuclei_values <- as.integer(df$Nuclei)
+  nuclei_matrix <- sweep(data, 2, nuclei_values, "/")
+  nuclei_matrix[!is.finite(nuclei_matrix)] <- 0
+  nuclei_matrix_negprobes<- sweep(nuclei_matrix , 2, geo_means, "/")
+  nuclei_matrix_housekeeping<- sweep(nuclei_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #VST
+  pseudocount <- median(data[data > 0]) / 10 
+  vst_matrix <- log2(data + pseudocount)
+  vst_matrix_negprobes<- sweep(vst_matrix , 2, geo_means, "/")
+  vst_matrix_housekeeping<- sweep(vst_matrix , 2, housekeeping_geo_means, "/")
+  
+  #RLOG 
+  pseudocount <- 1
+  log_data <- log2(data + pseudocount)
+  gene_means <- rowMeans(log_data)
+  gene_sds <- apply(log_data, 1, sd)
+  rlog_matrix<- t(apply(log_data, 1, function(x) (x - mean(x)) / sd(x) * mean(x)))
+  rlog_matrix_negprobes<- sweep(rlog_matrix , 2, geo_means, "/")
+  rlog_matrix_housekeeping<- sweep(rlog_matrix , 2, housekeeping_geo_means, "/")
+  
+  list(
+    CPM = cpm_matrix,
+    TMM = tmm_matrix,
+    LogCPM = log_cpm_matrix,
+    RLOG = rlog_matrix,
+    VST = vst_matrix,
+    Quantile = quantile_matrix,
+    ThirdQuantile = q3_matrix,
+    Area=area_matrix,
+    Nuclei=nuclei_matrix,
+    NegProbes=negativeprobes_normalized_matrix,
+    Housekeeping=housekeeping_normalized_matrix,
+    NegProbes_CPM = cpm_matrix_negprobes,
+    Housekeeping_CPM = cpm_matrix_housekeeping,
+    NegProbes_LogCPM = log_cpm_matrix_negprobes,
+    Housekeeping_LogCPM = log_cpm_matrix_housekeeping,
+    NegProbes_TMM = tmm_matrix_negprobes,
+    Housekeeping_TMM = tmm_matrix_housekeeping,
+    NegProbes_Quantile = quantile_matrix_negprobes,
+    Housekeeping_Quantile = quantile_matrix_housekeeping,
+    NegProbes_ThirdQuantile = q3_matrix_negprobes,
+    Housekeeping_ThirdQuantile = q3_matrix_housekeeping,
+    NegProbes_Area = area_matrix_negprobes,
+    Housekeeping_Area = area_matrix_housekeeping,
+    NegProbes_Nuclei = nuclei_matrix_negprobes,
+    Housekeeping_Nuclei = nuclei_matrix_housekeeping,
+    NegProbes_VST = vst_matrix_negprobes,
+    Housekeeping_VST = vst_matrix_housekeeping,
+    NegProbes_RLOG = rlog_matrix_negprobes,
+    Housekeeping_RLOG = rlog_matrix_housekeeping,
+    Raw=data
+  )
+}
+normalized_matrices <- normalized_matrix(data,df)
+library(edgeR)
+metadata <- data.frame(
+  sampleID  = df$merge,
+  condition = factor(df$Condition),
+  batch     = factor(df$N_samples_istologico))
+rownames(metadata) <- metadata$sampleID
+library(metaRNASeq)
+library(SurfR)
+df.OSR <- DGE(expression = round(normalized_matrices[["CPM"]]),
+              metadata = metadata,
+              Nreplica = min(table(metadata$condition)),
+              design = "~condition",
+              condition = "condition",
+              alpha = 0.05,
+              TEST = "CR", CTRL =  "NR",
+              output_tsv = FALSE)
+
+##################################################
+#setwd("/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/GeoMX_IRST")
+setwd("~/GeoMX/GeoMX_IRST")
+
+
+# Set your root directory (the top-level folder containing subdirectories with DCC files)
+root_dir <- "~/GeoMX/GeoMX_IRST"
+
+# Recursively list all DCC files in the root directory and its subdirectories
+dcc_files <- list.files(path = root_dir, pattern = "\\.dcc$", full.names = TRUE, recursive = TRUE)
+
+# Function to extract and parse <Code_Summary> content into a data frame
+extract_code_summary <- function(file) {
+  # Read all lines from the file
+  lines <- readLines(file)
+  
+  # Find the lines containing <Code_Summary> and </Code_Summary>
+  start <- grep("<Code_Summary>", lines)
+  end <- grep("</Code_Summary>", lines)
+  
+  # Extract the lines between the tags
+  if (length(start) > 0 && length(end) > 0 && start < end) {
+    content <- lines[(start + 1):(end - 1)]  # Exclude the tags themselves
+    
+    # Convert content into a data frame assuming "probe counts" are tab-separated
+    content_df <- read.table(text = content, header = FALSE, sep = ",",
+                             col.names = c("Probe", "Counts"), stringsAsFactors = FALSE)
+    return(content_df)
+  } else {
+    return(data.frame(Probe = character(), Counts = numeric()))  # Empty data frame
+  }
+}
+
+# Step 1: Extract data from all DCC files
+code_summary_list <- lapply(dcc_files, extract_code_summary)
+
+# Step 2: Get all unique probes across all files
+all_probes <- unique(unlist(lapply(code_summary_list, function(x) x$Probe)))
+
+# Step 3: Initialize a matrix to store counts
+count_matrix <- matrix(0, nrow = length(all_probes), ncol = length(dcc_files),
+                       dimnames = list(all_probes, basename(dcc_files)))
+
+# Step 4: Populate the matrix with counts
+for (i in seq_along(dcc_files)) {
+  file_data <- code_summary_list[[i]]
+  if (nrow(file_data) > 0) {
+    # Match probes and update counts
+    count_matrix[file_data$Probe, i] <- file_data$Counts
+  }
+}
+
+# View the resulting matrix
+print(count_matrix)
+
+# Optionally, save the matrix as a CSV file
+write.csv(count_matrix, file = "combined_code_summary_matrix.csv", row.names = TRUE)
+
+df<-read.delim("sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+colnames(count_matrix)<-gsub(".dcc","",colnames(count_matrix))
+intersect(df$FastqID,colnames(count_matrix))
+#chi è CR e NR
+df$Condition<-"NR"
+df$Condition[df$ID_Sample_Slide_ID %in% c("01A-0485","01A-0481","01A-0523")]<-"CR"
+
+#convert in matrice di geni
+probe<-read.delim("new_probelist.txt",header = F)
+
+count_matrix<-count_matrix[intersect(rownames(count_matrix),probe$V2),]
+probe<-probe[probe$V2 %in% intersect(rownames(count_matrix),probe$V2),]
+rownames(count_matrix)<-probe$V1
+exon_sample_matrix<-count_matrix
+
+gene_ids<- ifelse(grepl("NegativeProbe", rownames(exon_sample_matrix)), rownames(exon_sample_matrix), sub("_.*", "", rownames(exon_sample_matrix)))
+sum(grepl("NegativeProbe",gene_ids))
+gene_sample_matrix<-rowsum(exon_sample_matrix, gene_ids)
+
+
+
+write.csv(gene_sample_matrix, file = "gene_matrix.csv", row.names = TRUE)
+
+########################
+########################
+library(dplyr)
+library(tidyr)
+library(edgeR)
+library(DESeq2)
+`%nin%` = Negate(`%in%`)
+
+df<-read.delim("new_sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+df$Area<-as.numeric(gsub(",",".",df$Area))
+descr<-read.delim("descr_ROI.txt")
+descr$FastqID<-gsub("=.*","",descr$FastqID)
+descr$FastqID<-gsub(" ","",descr$FastqID)
+df<-merge(df,descr,by.x="FastqID",by.y="FastqID")
+df$Condition<-"NR"
+df$N_samples_istologico[df$N_samples_istologico %in% c("C1826515","C1826516","C1826517",
+                                                       "C1826518","C1826519","C1826520","C1826521","C1826522",
+                                                       "C1826523","C1826524","C1826525","C1826526","C1826527",
+                                                       "C1826528","C1826529","C1826530","C1826531","C1826532",
+                                                       "C1826533","C1826534","C1826535")]<-"C1826514"
+
+df$Condition[df$N_samples_istologico  %in% c("C1624423","C1624291","C1632599",
+                                             "24-I-00321"," 21-I-11612","18-06411",
+                                             "20-10783")]<-"CR"
+df$Batch<-"OSR"
+df$Batch[df$N_samples_istologico %in% c("C1622274","C1624291","C1624423","C1628347","C1624909","C1631077","C1632599","C1826514","C1826515",
+                                        "C1826516","C1826517","C1826518","C1826519","C1826520","C1826521","C1826522",
+                                        "C1826523","C1826524","C1826525","C1826526","C1826527","C1826528","C1826529",
+                                        "C1826530","C1826531","C1826532","C1826533","C1826534","C1826535")]<-"FREGAT"
+
+df$FastqID<-gsub(" ","",df$FastqID)
+df<-df[df$FastqID  %nin% c("DSP-1001660035811-E-A06","DSP-1001660035811-E-A09",
+                           "DSP-1001660035811-E-B08",
+                           "DSP-1001660035811-E-F07","DSP-1001660035811-E-F08",
+                           "DSP-1001660035811-E-G07","DSP-1001660035811-E-G10",
+                           "DSP-1001660035812-F-B09","DSP-1001660035812-F-B10",
+                           "DSP-1001660035812-F-B11","DSP-1001660035812-F-C03",
+                           "DSP-1001660035812-F-C04","DSP-1001660035812-F-C05",
+                           #                           "DSP-1001660035812-F-C06",
+                           #                           "DSP-1001660035812-F-C07",
+                           "DSP-1001660035812-F-E09",
+                           "DSP-1001660035812-F-G09",
+                           "DSP-1001660012001-B-E12",
+                           "DSP-1001660016058-C-E09",
+                           "DSP-1001660016058-C-E10",
+                           #                           "DSP-1001660016057-D-B07",
+                           #                           "DSP-1001660016057-D-B08",
+                           #                           "DSP-1001660016057-D-B09",
+                           "DSP-1001660016057-D-C11",
+                           "DSP-1001660016057-D-D06",
+                           "DSP-1001660016057-D-D07",
+                           "DSP-1001660016057-D-E06",
+                           "DSP-1001660016057-D-E07",
+                           "DSP-1001660016057-D-E08",
+                           "DSP-1001660016057-D-E09",
+                           "DSP-1001660016057-D-E10",
+                           "DSP-1001660016057-D-E11",
+                           "DSP-1001660035811-E-F06","DSP-1001660035811-E-F12","DSP-1001660016057-D-D12","DSP-1001660016057-D-E01"),]                      
+
+
+df<-df[df$Segment_Name!="NCT",]
+
+
+gene_sample_matrix<-gene_sample_matrix[,df$FastqID]
+
+
+df$merge<-""
+df$merge[df$Segment_Name %in% c("LINFOCITI", "MACROFAGI")] <- paste("STROMA",paste(df$ID_Sample_Slide_ID[df$Segment_Name %in% c("LINFOCITI", "MACROFAGI")], df$ROI[df$Segment_Name %in% c("LINFOCITI", "MACROFAGI")]))
+df$merge[df$Segment_Name %in% c("TUMORE")] <- paste("TUMORE",paste(df$ID_Sample_Slide_ID[df$Segment_Name %in% c("TUMORE")] , df$ROI[df$Segment_Name %in% c("TUMORE")] ))
+
+group_vector<-df$merge
+counts_t <- as.data.frame(t(gene_sample_matrix))
+counts_t$Group <- group_vector
+
+# Aggregate by group
+merged_counts <- aggregate(. ~ Group, data = counts_t, FUN = sum)
+
+# Transpose back to original format
+merged_counts <- as.data.frame(t(merged_counts[-1]))
+colnames(merged_counts) <- merged_counts[1,]
+merged_counts <- merged_counts[-1,]
+print(merged_counts)
+
+dim(merged_counts)
+colnames(merged_counts)<-unique(df$merge)
+gene_sample_matrix<-merged_counts
+
+
+df<-df[,-c(1:3)]
+df$Segment_Name[grepl("STROMA",df$merge)]<-"STROMA"
+df$Segment_Name[grepl("TUMORE",df$merge)]<-"TUMORE"
+df<-df %>%
+  group_by(ID_Sample_Slide_ID,N_samples_istologico,Condition,Segment_Name,
+           Batch,ROI,merge) %>%
+  summarise(sumArea=sum(as.numeric(Area)),sumNuclei=sum(as.numeric(Nuclei)))
+
+
+df$Area<-df$sumArea
+df$Nuclei<-df$sumNuclei
+
+
+
+
+df<-df[df$Segment_Name=="STROMA",]
+df<-df[df$Batch=="FREGAT",]
+#df<-df[df$ID_Sample_Slide_ID!="75299 (#4)",]
+gene_sample_matrix<-merged_counts[,df$merge]
+
+data <- as.integer(as.matrix(gene_sample_matrix))
+
+# Convert to integer matrix
+integer_matrix <- apply(gene_sample_matrix, c(1, 2), as.integer)
+
+# Maintain row and column names
+rownames(integer_matrix) <- rownames(gene_sample_matrix)
+colnames(integer_matrix) <- colnames(gene_sample_matrix)
+
+data<-integer_matrix
+
+#corrected_matrix <- removeBatchEffect(data,batch=df$N_samples_istologico,group=df$Condition)
+#data<-corrected_matrix
+#data[!is.finite(data)]<-0
+
+# Normalization function row gene and col sample
+normalized_matrix <- function(data,df) {
+  
+  #Negative probes
+  negative_probes <- data[grepl("Neg",rownames(data)),]
+  geo_means <- apply(negative_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  negativeprobes_normalized_matrix <- sweep(data, 2, geo_means, "/")
+  
+  #Housekeeping
+  housekeeping_probes <- data[rownames(data) %in% c("ACTB","GAPDH","RPLPO",
+                                                    "B2M","HPRT1","TBP","PPIA",
+                                                    "TUBB","SDHA","EIF4A1"),]
+  housekeeping_geo_means <- apply(housekeeping_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  housekeeping_normalized_matrix <- sweep(data, 2, housekeeping_geo_means, "/")
+  
+  # CPM Normalization
+  cpm_matrix <- cpm(data)
+  cpm_matrix_negprobes<- sweep(cpm_matrix, 2, geo_means, "/")
+  cpm_matrix_housekeeping<- sweep(cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #LOG CPM Normalization
+  log_cpm_matrix <- log2(cpm_matrix + 1)
+  log_cpm_matrix_negprobes<- sweep(log_cpm_matrix, 2, geo_means, "/")
+  log_cpm_matrix_housekeeping<- sweep(log_cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #TMM Normalization 
+  dge <- DGEList(counts = data)
+  dge <- calcNormFactors(dge, method = "TMM")
+  tmm_matrix <- cpm(dge)
+  tmm_matrix_negprobes<- sweep(tmm_matrix, 2, geo_means, "/")
+  tmm_matrix_housekeeping<- sweep(tmm_matrix, 2, housekeeping_geo_means, "/")  
+  
+  
+  #QUANTILE
+  quantile_matrix<-normalizeBetweenArrays(data, method = "quantile")
+  quantile_matrix_negprobes<- sweep(quantile_matrix, 2, geo_means, "/")
+  quantile_matrix_housekeeping<- sweep(quantile_matrix, 2, housekeeping_geo_means, "/")  
+  
+  #THIRD QUANTILE
+  q3_values <- apply(data,2,quantile, probs = 0.75)
+  q3_matrix <- sweep(data, 2, q3_values, "/")
+  q3_matrix[!is.finite(q3_matrix)] <- 0
+  q3_matrix_negprobes<- sweep(q3_matrix , 2, geo_means, "/")
+  q3_matrix_housekeeping<- sweep(q3_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #AREA
+  area_values <- df$Area
+  area_matrix <- sweep(data, 2, area_values, "/")
+  area_matrix[!is.finite(area_matrix)] <- 0
+  area_matrix_negprobes<- sweep(area_matrix , 2, geo_means, "/")
+  area_matrix_housekeeping<- sweep(area_matrix , 2, housekeeping_geo_means, "/")
+  
+  #NUCLEI
+  nuclei_values <- as.integer(df$Nuclei)
+  nuclei_matrix <- sweep(data, 2, nuclei_values, "/")
+  nuclei_matrix[!is.finite(nuclei_matrix)] <- 0
+  nuclei_matrix_negprobes<- sweep(nuclei_matrix , 2, geo_means, "/")
+  nuclei_matrix_housekeeping<- sweep(nuclei_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #VST
+  pseudocount <- median(data[data > 0]) / 10 
+  vst_matrix <- log2(data + pseudocount)
+  vst_matrix_negprobes<- sweep(vst_matrix , 2, geo_means, "/")
+  vst_matrix_housekeeping<- sweep(vst_matrix , 2, housekeeping_geo_means, "/")
+  
+  #RLOG 
+  pseudocount <- 1
+  log_data <- log2(data + pseudocount)
+  gene_means <- rowMeans(log_data)
+  gene_sds <- apply(log_data, 1, sd)
+  rlog_matrix<- t(apply(log_data, 1, function(x) (x - mean(x)) / sd(x) * mean(x)))
+  rlog_matrix_negprobes<- sweep(rlog_matrix , 2, geo_means, "/")
+  rlog_matrix_housekeeping<- sweep(rlog_matrix , 2, housekeeping_geo_means, "/")
+  
+  list(
+    CPM = cpm_matrix,
+    TMM = tmm_matrix,
+    LogCPM = log_cpm_matrix,
+    RLOG = rlog_matrix,
+    VST = vst_matrix,
+    Quantile = quantile_matrix,
+    ThirdQuantile = q3_matrix,
+    Area=area_matrix,
+    Nuclei=nuclei_matrix,
+    NegProbes=negativeprobes_normalized_matrix,
+    Housekeeping=housekeeping_normalized_matrix,
+    NegProbes_CPM = cpm_matrix_negprobes,
+    Housekeeping_CPM = cpm_matrix_housekeeping,
+    NegProbes_LogCPM = log_cpm_matrix_negprobes,
+    Housekeeping_LogCPM = log_cpm_matrix_housekeeping,
+    NegProbes_TMM = tmm_matrix_negprobes,
+    Housekeeping_TMM = tmm_matrix_housekeeping,
+    NegProbes_Quantile = quantile_matrix_negprobes,
+    Housekeeping_Quantile = quantile_matrix_housekeeping,
+    NegProbes_ThirdQuantile = q3_matrix_negprobes,
+    Housekeeping_ThirdQuantile = q3_matrix_housekeeping,
+    NegProbes_Area = area_matrix_negprobes,
+    Housekeeping_Area = area_matrix_housekeeping,
+    NegProbes_Nuclei = nuclei_matrix_negprobes,
+    Housekeeping_Nuclei = nuclei_matrix_housekeeping,
+    NegProbes_VST = vst_matrix_negprobes,
+    Housekeeping_VST = vst_matrix_housekeeping,
+    NegProbes_RLOG = rlog_matrix_negprobes,
+    Housekeeping_RLOG = rlog_matrix_housekeeping,
+    Raw=data
+  )
+}
+normalized_matrices <- normalized_matrix(data,df)
+library(edgeR)
+metadata <- data.frame(
+  sampleID  = df$merge,
+  condition = factor(df$Condition),
+  batch     = factor(df$N_samples_istologico))
+rownames(metadata) <- metadata$sampleID
+library(metaRNASeq)
+library(SurfR)
+df.FREGAT <- DGE(expression = round(normalized_matrices[["CPM"]]),
+              metadata = metadata,
+              Nreplica = min(table(metadata$condition)),
+              design = "~condition",
+              condition = "condition",
+              alpha = 0.05,
+              TEST = "CR", CTRL =  "NR",
+              output_tsv = FALSE)
+
+L_fishercomb <- metaRNAseq(ind_deg = list(FREGAT=df.FREGAT,
+                                          OSR=df.OSR),
+                           test_statistic = "fishercomb",
+                           BHth = 0.05,
+                           adjpval.t = 0.05,nrep=c(Replica.FREGAT,Replica.OSR))
+L_invnorm <- metaRNAseq(ind_deg = list(FREGAT=df.FREGAT,
+                                       OSR=df.OSR),
+                        test_statistic = "invnorm",
+                        BHth = 0.05,
+                        adjpval.t = 0.05,
+                        nrep=c(Replica.FREGAT,Replica.OSR))
+metacomb_stroma <- combine_fisher_invnorm(ind_deg = list(FREGAT=df.FREGAT,
+                                                  OSR=df.OSR),
+                                   invnorm = L_invnorm,
+                                   fishercomb = L_fishercomb,
+                                   adjpval = 0.05)
+
+
+#############################################
+###############################################
+##################################################
+#setwd("/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/GeoMX_IRST")
+setwd("~/GeoMX/GeoMX_IRST")
+
+
+# Set your root directory (the top-level folder containing subdirectories with DCC files)
+root_dir <- "~/GeoMX/GeoMX_IRST"
+
+# Recursively list all DCC files in the root directory and its subdirectories
+dcc_files <- list.files(path = root_dir, pattern = "\\.dcc$", full.names = TRUE, recursive = TRUE)
+
+# Function to extract and parse <Code_Summary> content into a data frame
+extract_code_summary <- function(file) {
+  # Read all lines from the file
+  lines <- readLines(file)
+  
+  # Find the lines containing <Code_Summary> and </Code_Summary>
+  start <- grep("<Code_Summary>", lines)
+  end <- grep("</Code_Summary>", lines)
+  
+  # Extract the lines between the tags
+  if (length(start) > 0 && length(end) > 0 && start < end) {
+    content <- lines[(start + 1):(end - 1)]  # Exclude the tags themselves
+    
+    # Convert content into a data frame assuming "probe counts" are tab-separated
+    content_df <- read.table(text = content, header = FALSE, sep = ",",
+                             col.names = c("Probe", "Counts"), stringsAsFactors = FALSE)
+    return(content_df)
+  } else {
+    return(data.frame(Probe = character(), Counts = numeric()))  # Empty data frame
+  }
+}
+
+# Step 1: Extract data from all DCC files
+code_summary_list <- lapply(dcc_files, extract_code_summary)
+
+# Step 2: Get all unique probes across all files
+all_probes <- unique(unlist(lapply(code_summary_list, function(x) x$Probe)))
+
+# Step 3: Initialize a matrix to store counts
+count_matrix <- matrix(0, nrow = length(all_probes), ncol = length(dcc_files),
+                       dimnames = list(all_probes, basename(dcc_files)))
+
+# Step 4: Populate the matrix with counts
+for (i in seq_along(dcc_files)) {
+  file_data <- code_summary_list[[i]]
+  if (nrow(file_data) > 0) {
+    # Match probes and update counts
+    count_matrix[file_data$Probe, i] <- file_data$Counts
+  }
+}
+
+# View the resulting matrix
+print(count_matrix)
+
+# Optionally, save the matrix as a CSV file
+write.csv(count_matrix, file = "combined_code_summary_matrix.csv", row.names = TRUE)
+
+df<-read.delim("sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+colnames(count_matrix)<-gsub(".dcc","",colnames(count_matrix))
+intersect(df$FastqID,colnames(count_matrix))
+#chi è CR e NR
+df$Condition<-"NR"
+df$Condition[df$ID_Sample_Slide_ID %in% c("01A-0485","01A-0481","01A-0523")]<-"CR"
+
+#convert in matrice di geni
+probe<-read.delim("new_probelist.txt",header = F)
+
+count_matrix<-count_matrix[intersect(rownames(count_matrix),probe$V2),]
+probe<-probe[probe$V2 %in% intersect(rownames(count_matrix),probe$V2),]
+rownames(count_matrix)<-probe$V1
+exon_sample_matrix<-count_matrix
+
+gene_ids<- ifelse(grepl("NegativeProbe", rownames(exon_sample_matrix)), rownames(exon_sample_matrix), sub("_.*", "", rownames(exon_sample_matrix)))
+sum(grepl("NegativeProbe",gene_ids))
+gene_sample_matrix<-rowsum(exon_sample_matrix, gene_ids)
+
+
+
+write.csv(gene_sample_matrix, file = "gene_matrix.csv", row.names = TRUE)
+
+########################
+########################
+library(dplyr)
+library(tidyr)
+library(edgeR)
+library(DESeq2)
+`%nin%` = Negate(`%in%`)
+
+df<-read.delim("new_sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+df$Area<-as.numeric(gsub(",",".",df$Area))
+descr<-read.delim("descr_ROI.txt")
+descr$FastqID<-gsub("=.*","",descr$FastqID)
+descr$FastqID<-gsub(" ","",descr$FastqID)
+df<-merge(df,descr,by.x="FastqID",by.y="FastqID")
+df$Condition<-"NR"
+df$N_samples_istologico[df$N_samples_istologico %in% c("C1826515","C1826516","C1826517",
+                                                       "C1826518","C1826519","C1826520","C1826521","C1826522",
+                                                       "C1826523","C1826524","C1826525","C1826526","C1826527",
+                                                       "C1826528","C1826529","C1826530","C1826531","C1826532",
+                                                       "C1826533","C1826534","C1826535")]<-"C1826514"
+
+df$Condition[df$N_samples_istologico  %in% c("C1624423","C1624291","C1632599",
+                                             "24-I-00321"," 21-I-11612","18-06411",
+                                             "20-10783")]<-"CR"
+df$Batch<-"OSR"
+df$Batch[df$N_samples_istologico %in% c("C1622274","C1624291","C1624423","C1628347","C1624909","C1631077","C1632599","C1826514","C1826515",
+                                        "C1826516","C1826517","C1826518","C1826519","C1826520","C1826521","C1826522",
+                                        "C1826523","C1826524","C1826525","C1826526","C1826527","C1826528","C1826529",
+                                        "C1826530","C1826531","C1826532","C1826533","C1826534","C1826535")]<-"FREGAT"
+
+df$FastqID<-gsub(" ","",df$FastqID)
+df<-df[df$FastqID  %nin% c("DSP-1001660035811-E-A06","DSP-1001660035811-E-A09",
+                           "DSP-1001660035811-E-B08",
+                           "DSP-1001660035811-E-F07","DSP-1001660035811-E-F08",
+                           "DSP-1001660035811-E-G07","DSP-1001660035811-E-G10",
+                           "DSP-1001660035812-F-B09","DSP-1001660035812-F-B10",
+                           "DSP-1001660035812-F-B11","DSP-1001660035812-F-C03",
+                           "DSP-1001660035812-F-C04","DSP-1001660035812-F-C05",
+                           #                           "DSP-1001660035812-F-C06",
+                           #                           "DSP-1001660035812-F-C07",
+                           "DSP-1001660035812-F-E09",
+                           "DSP-1001660035812-F-G09",
+                           "DSP-1001660012001-B-E12",
+                           "DSP-1001660016058-C-E09",
+                           "DSP-1001660016058-C-E10",
+                           #                           "DSP-1001660016057-D-B07",
+                           #                           "DSP-1001660016057-D-B08",
+                           #                           "DSP-1001660016057-D-B09",
+                           "DSP-1001660016057-D-C11",
+                           "DSP-1001660016057-D-D06",
+                           "DSP-1001660016057-D-D07",
+                           "DSP-1001660016057-D-E06",
+                           "DSP-1001660016057-D-E07",
+                           "DSP-1001660016057-D-E08",
+                           "DSP-1001660016057-D-E09",
+                           "DSP-1001660016057-D-E10",
+                           "DSP-1001660016057-D-E11",
+                           "DSP-1001660035811-E-F06","DSP-1001660035811-E-F12","DSP-1001660016057-D-D12","DSP-1001660016057-D-E01"),]                      
+
+
+df<-df[df$Segment_Name!="NCT",]
+
+
+
+
+
+
+
+df<-df[df$Segment_Name=="TUMORE",]
+Replica.FREGAT<-nrow(df[df$Batch=="FREGAT",])
+Replica.OSR<-nrow(df[df$Batch=="OSR",])
+df<-df[df$Batch=="OSR",]
+#df<-df[df$ID_Sample_Slide_ID!="75299 (#4)",]
+gene_sample_matrix<-gene_sample_matrix[,df$FastqID]
+
+data <- as.integer(as.matrix(gene_sample_matrix))
+
+# Convert to integer matrix
+integer_matrix <- apply(gene_sample_matrix, c(1, 2), as.integer)
+
+# Maintain row and column names
+rownames(integer_matrix) <- rownames(gene_sample_matrix)
+colnames(integer_matrix) <- colnames(gene_sample_matrix)
+
+data<-integer_matrix
+
+#corrected_matrix <- removeBatchEffect(data,batch=df$N_samples_istologico,group=df$Condition)
+#data<-corrected_matrix
+#data[!is.finite(data)]<-0
+
+# Normalization function row gene and col sample
+normalized_matrix <- function(data,df) {
+  
+  #Negative probes
+  negative_probes <- data[grepl("Neg",rownames(data)),]
+  geo_means <- apply(negative_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  negativeprobes_normalized_matrix <- sweep(data, 2, geo_means, "/")
+  
+  #Housekeeping
+  housekeeping_probes <- data[rownames(data) %in% c("ACTB","GAPDH","RPLPO",
+                                                    "B2M","HPRT1","TBP","PPIA",
+                                                    "TUBB","SDHA","EIF4A1"),]
+  housekeeping_geo_means <- apply(housekeeping_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  housekeeping_normalized_matrix <- sweep(data, 2, housekeeping_geo_means, "/")
+  
+  # CPM Normalization
+  cpm_matrix <- cpm(data)
+  cpm_matrix_negprobes<- sweep(cpm_matrix, 2, geo_means, "/")
+  cpm_matrix_housekeeping<- sweep(cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #LOG CPM Normalization
+  log_cpm_matrix <- log2(cpm_matrix + 1)
+  log_cpm_matrix_negprobes<- sweep(log_cpm_matrix, 2, geo_means, "/")
+  log_cpm_matrix_housekeeping<- sweep(log_cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #TMM Normalization 
+  dge <- DGEList(counts = data)
+  dge <- calcNormFactors(dge, method = "TMM")
+  tmm_matrix <- cpm(dge)
+  tmm_matrix_negprobes<- sweep(tmm_matrix, 2, geo_means, "/")
+  tmm_matrix_housekeeping<- sweep(tmm_matrix, 2, housekeeping_geo_means, "/")  
+  
+  
+  #QUANTILE
+  quantile_matrix<-normalizeBetweenArrays(data, method = "quantile")
+  quantile_matrix_negprobes<- sweep(quantile_matrix, 2, geo_means, "/")
+  quantile_matrix_housekeeping<- sweep(quantile_matrix, 2, housekeeping_geo_means, "/")  
+  
+  #THIRD QUANTILE
+  q3_values <- apply(data,2,quantile, probs = 0.75)
+  q3_matrix <- sweep(data, 2, q3_values, "/")
+  q3_matrix[!is.finite(q3_matrix)] <- 0
+  q3_matrix_negprobes<- sweep(q3_matrix , 2, geo_means, "/")
+  q3_matrix_housekeeping<- sweep(q3_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #AREA
+  area_values <- df$Area
+  area_matrix <- sweep(data, 2, area_values, "/")
+  area_matrix[!is.finite(area_matrix)] <- 0
+  area_matrix_negprobes<- sweep(area_matrix , 2, geo_means, "/")
+  area_matrix_housekeeping<- sweep(area_matrix , 2, housekeeping_geo_means, "/")
+  
+  #NUCLEI
+  nuclei_values <- as.integer(df$Nuclei)
+  nuclei_matrix <- sweep(data, 2, nuclei_values, "/")
+  nuclei_matrix[!is.finite(nuclei_matrix)] <- 0
+  nuclei_matrix_negprobes<- sweep(nuclei_matrix , 2, geo_means, "/")
+  nuclei_matrix_housekeeping<- sweep(nuclei_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #VST
+  pseudocount <- median(data[data > 0]) / 10 
+  vst_matrix <- log2(data + pseudocount)
+  vst_matrix_negprobes<- sweep(vst_matrix , 2, geo_means, "/")
+  vst_matrix_housekeeping<- sweep(vst_matrix , 2, housekeeping_geo_means, "/")
+  
+  #RLOG 
+  pseudocount <- 1
+  log_data <- log2(data + pseudocount)
+  gene_means <- rowMeans(log_data)
+  gene_sds <- apply(log_data, 1, sd)
+  rlog_matrix<- t(apply(log_data, 1, function(x) (x - mean(x)) / sd(x) * mean(x)))
+  rlog_matrix_negprobes<- sweep(rlog_matrix , 2, geo_means, "/")
+  rlog_matrix_housekeeping<- sweep(rlog_matrix , 2, housekeeping_geo_means, "/")
+  
+  list(
+    CPM = cpm_matrix,
+    TMM = tmm_matrix,
+    LogCPM = log_cpm_matrix,
+    RLOG = rlog_matrix,
+    VST = vst_matrix,
+    Quantile = quantile_matrix,
+    ThirdQuantile = q3_matrix,
+    Area=area_matrix,
+    Nuclei=nuclei_matrix,
+    NegProbes=negativeprobes_normalized_matrix,
+    Housekeeping=housekeeping_normalized_matrix,
+    NegProbes_CPM = cpm_matrix_negprobes,
+    Housekeeping_CPM = cpm_matrix_housekeeping,
+    NegProbes_LogCPM = log_cpm_matrix_negprobes,
+    Housekeeping_LogCPM = log_cpm_matrix_housekeeping,
+    NegProbes_TMM = tmm_matrix_negprobes,
+    Housekeeping_TMM = tmm_matrix_housekeeping,
+    NegProbes_Quantile = quantile_matrix_negprobes,
+    Housekeeping_Quantile = quantile_matrix_housekeeping,
+    NegProbes_ThirdQuantile = q3_matrix_negprobes,
+    Housekeeping_ThirdQuantile = q3_matrix_housekeeping,
+    NegProbes_Area = area_matrix_negprobes,
+    Housekeeping_Area = area_matrix_housekeeping,
+    NegProbes_Nuclei = nuclei_matrix_negprobes,
+    Housekeeping_Nuclei = nuclei_matrix_housekeeping,
+    NegProbes_VST = vst_matrix_negprobes,
+    Housekeeping_VST = vst_matrix_housekeeping,
+    NegProbes_RLOG = rlog_matrix_negprobes,
+    Housekeeping_RLOG = rlog_matrix_housekeeping,
+    Raw=data
+  )
+}
+normalized_matrices <- normalized_matrix(data,df)
+library(edgeR)
+metadata <- data.frame(
+  sampleID  = df$FastqID,
+  condition = factor(df$Condition),
+  batch     = factor(df$N_samples_istologico))
+rownames(metadata) <- metadata$sampleID
+library(metaRNASeq)
+library(SurfR)
+df.OSR <- DGE(expression = round(normalized_matrices[["CPM"]]),
+              metadata = metadata,
+              Nreplica = min(table(metadata$condition)),
+              design = "~condition",
+              condition = "condition",
+              alpha = 0.05,
+              TEST = "CR", CTRL =  "NR",
+              output_tsv = FALSE)
+
+##################################################
+#setwd("/beegfs/scratch/ric.cosr/ric.cosr/DellabonaP/GeoMX_IRST")
+setwd("~/GeoMX/GeoMX_IRST")
+
+
+# Set your root directory (the top-level folder containing subdirectories with DCC files)
+root_dir <- "~/GeoMX/GeoMX_IRST"
+
+# Recursively list all DCC files in the root directory and its subdirectories
+dcc_files <- list.files(path = root_dir, pattern = "\\.dcc$", full.names = TRUE, recursive = TRUE)
+
+# Function to extract and parse <Code_Summary> content into a data frame
+extract_code_summary <- function(file) {
+  # Read all lines from the file
+  lines <- readLines(file)
+  
+  # Find the lines containing <Code_Summary> and </Code_Summary>
+  start <- grep("<Code_Summary>", lines)
+  end <- grep("</Code_Summary>", lines)
+  
+  # Extract the lines between the tags
+  if (length(start) > 0 && length(end) > 0 && start < end) {
+    content <- lines[(start + 1):(end - 1)]  # Exclude the tags themselves
+    
+    # Convert content into a data frame assuming "probe counts" are tab-separated
+    content_df <- read.table(text = content, header = FALSE, sep = ",",
+                             col.names = c("Probe", "Counts"), stringsAsFactors = FALSE)
+    return(content_df)
+  } else {
+    return(data.frame(Probe = character(), Counts = numeric()))  # Empty data frame
+  }
+}
+
+# Step 1: Extract data from all DCC files
+code_summary_list <- lapply(dcc_files, extract_code_summary)
+
+# Step 2: Get all unique probes across all files
+all_probes <- unique(unlist(lapply(code_summary_list, function(x) x$Probe)))
+
+# Step 3: Initialize a matrix to store counts
+count_matrix <- matrix(0, nrow = length(all_probes), ncol = length(dcc_files),
+                       dimnames = list(all_probes, basename(dcc_files)))
+
+# Step 4: Populate the matrix with counts
+for (i in seq_along(dcc_files)) {
+  file_data <- code_summary_list[[i]]
+  if (nrow(file_data) > 0) {
+    # Match probes and update counts
+    count_matrix[file_data$Probe, i] <- file_data$Counts
+  }
+}
+
+# View the resulting matrix
+print(count_matrix)
+
+# Optionally, save the matrix as a CSV file
+write.csv(count_matrix, file = "combined_code_summary_matrix.csv", row.names = TRUE)
+
+df<-read.delim("sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+colnames(count_matrix)<-gsub(".dcc","",colnames(count_matrix))
+intersect(df$FastqID,colnames(count_matrix))
+#chi è CR e NR
+df$Condition<-"NR"
+df$Condition[df$ID_Sample_Slide_ID %in% c("01A-0485","01A-0481","01A-0523")]<-"CR"
+
+#convert in matrice di geni
+probe<-read.delim("new_probelist.txt",header = F)
+
+count_matrix<-count_matrix[intersect(rownames(count_matrix),probe$V2),]
+probe<-probe[probe$V2 %in% intersect(rownames(count_matrix),probe$V2),]
+rownames(count_matrix)<-probe$V1
+exon_sample_matrix<-count_matrix
+
+gene_ids<- ifelse(grepl("NegativeProbe", rownames(exon_sample_matrix)), rownames(exon_sample_matrix), sub("_.*", "", rownames(exon_sample_matrix)))
+sum(grepl("NegativeProbe",gene_ids))
+gene_sample_matrix<-rowsum(exon_sample_matrix, gene_ids)
+
+
+
+write.csv(gene_sample_matrix, file = "gene_matrix.csv", row.names = TRUE)
+
+########################
+########################
+library(dplyr)
+library(tidyr)
+library(edgeR)
+library(DESeq2)
+`%nin%` = Negate(`%in%`)
+
+df<-read.delim("new_sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+df$Area<-as.numeric(gsub(",",".",df$Area))
+descr<-read.delim("descr_ROI.txt")
+descr$FastqID<-gsub("=.*","",descr$FastqID)
+descr$FastqID<-gsub(" ","",descr$FastqID)
+df<-merge(df,descr,by.x="FastqID",by.y="FastqID")
+df$Condition<-"NR"
+df$N_samples_istologico[df$N_samples_istologico %in% c("C1826515","C1826516","C1826517",
+                                                       "C1826518","C1826519","C1826520","C1826521","C1826522",
+                                                       "C1826523","C1826524","C1826525","C1826526","C1826527",
+                                                       "C1826528","C1826529","C1826530","C1826531","C1826532",
+                                                       "C1826533","C1826534","C1826535")]<-"C1826514"
+
+df$Condition[df$N_samples_istologico  %in% c("C1624423","C1624291","C1632599",
+                                             "24-I-00321"," 21-I-11612","18-06411",
+                                             "20-10783")]<-"CR"
+df$Batch<-"OSR"
+df$Batch[df$N_samples_istologico %in% c("C1622274","C1624291","C1624423","C1628347","C1624909","C1631077","C1632599","C1826514","C1826515",
+                                        "C1826516","C1826517","C1826518","C1826519","C1826520","C1826521","C1826522",
+                                        "C1826523","C1826524","C1826525","C1826526","C1826527","C1826528","C1826529",
+                                        "C1826530","C1826531","C1826532","C1826533","C1826534","C1826535")]<-"FREGAT"
+
+df$FastqID<-gsub(" ","",df$FastqID)
+df<-df[df$FastqID  %nin% c("DSP-1001660035811-E-A06","DSP-1001660035811-E-A09",
+                           "DSP-1001660035811-E-B08",
+                           "DSP-1001660035811-E-F07","DSP-1001660035811-E-F08",
+                           "DSP-1001660035811-E-G07","DSP-1001660035811-E-G10",
+                           "DSP-1001660035812-F-B09","DSP-1001660035812-F-B10",
+                           "DSP-1001660035812-F-B11","DSP-1001660035812-F-C03",
+                           "DSP-1001660035812-F-C04","DSP-1001660035812-F-C05",
+                           #                           "DSP-1001660035812-F-C06",
+                           #                           "DSP-1001660035812-F-C07",
+                           "DSP-1001660035812-F-E09",
+                           "DSP-1001660035812-F-G09",
+                           "DSP-1001660012001-B-E12",
+                           "DSP-1001660016058-C-E09",
+                           "DSP-1001660016058-C-E10",
+                           #                           "DSP-1001660016057-D-B07",
+                           #                           "DSP-1001660016057-D-B08",
+                           #                           "DSP-1001660016057-D-B09",
+                           "DSP-1001660016057-D-C11",
+                           "DSP-1001660016057-D-D06",
+                           "DSP-1001660016057-D-D07",
+                           "DSP-1001660016057-D-E06",
+                           "DSP-1001660016057-D-E07",
+                           "DSP-1001660016057-D-E08",
+                           "DSP-1001660016057-D-E09",
+                           "DSP-1001660016057-D-E10",
+                           "DSP-1001660016057-D-E11",
+                           "DSP-1001660035811-E-F06","DSP-1001660035811-E-F12","DSP-1001660016057-D-D12","DSP-1001660016057-D-E01"),]                      
+
+
+df<-df[df$Segment_Name!="NCT",]
+
+
+
+
+
+
+
+df<-df[df$Segment_Name=="TUMORE",]
+df<-df[df$Batch=="FREGAT",]
+#df<-df[df$ID_Sample_Slide_ID!="75299 (#4)",]
+gene_sample_matrix<-gene_sample_matrix[,df$FastqID]
+
+data <- as.integer(as.matrix(gene_sample_matrix))
+
+# Convert to integer matrix
+integer_matrix <- apply(gene_sample_matrix, c(1, 2), as.integer)
+
+# Maintain row and column names
+rownames(integer_matrix) <- rownames(gene_sample_matrix)
+colnames(integer_matrix) <- colnames(gene_sample_matrix)
+
+data<-integer_matrix
+
+#corrected_matrix <- removeBatchEffect(data,batch=df$N_samples_istologico,group=df$Condition)
+#data<-corrected_matrix
+#data[!is.finite(data)]<-0
+
+# Normalization function row gene and col sample
+normalized_matrix <- function(data,df) {
+  
+  #Negative probes
+  negative_probes <- data[grepl("Neg",rownames(data)),]
+  geo_means <- apply(negative_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  negativeprobes_normalized_matrix <- sweep(data, 2, geo_means, "/")
+  
+  #Housekeeping
+  housekeeping_probes <- data[rownames(data) %in% c("ACTB","GAPDH","RPLPO",
+                                                    "B2M","HPRT1","TBP","PPIA",
+                                                    "TUBB","SDHA","EIF4A1"),]
+  housekeeping_geo_means <- apply(housekeeping_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
+  housekeeping_normalized_matrix <- sweep(data, 2, housekeeping_geo_means, "/")
+  
+  # CPM Normalization
+  cpm_matrix <- cpm(data)
+  cpm_matrix_negprobes<- sweep(cpm_matrix, 2, geo_means, "/")
+  cpm_matrix_housekeeping<- sweep(cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #LOG CPM Normalization
+  log_cpm_matrix <- log2(cpm_matrix + 1)
+  log_cpm_matrix_negprobes<- sweep(log_cpm_matrix, 2, geo_means, "/")
+  log_cpm_matrix_housekeeping<- sweep(log_cpm_matrix, 2, housekeeping_geo_means, "/")
+  
+  #TMM Normalization 
+  dge <- DGEList(counts = data)
+  dge <- calcNormFactors(dge, method = "TMM")
+  tmm_matrix <- cpm(dge)
+  tmm_matrix_negprobes<- sweep(tmm_matrix, 2, geo_means, "/")
+  tmm_matrix_housekeeping<- sweep(tmm_matrix, 2, housekeeping_geo_means, "/")  
+  
+  
+  #QUANTILE
+  quantile_matrix<-normalizeBetweenArrays(data, method = "quantile")
+  quantile_matrix_negprobes<- sweep(quantile_matrix, 2, geo_means, "/")
+  quantile_matrix_housekeeping<- sweep(quantile_matrix, 2, housekeeping_geo_means, "/")  
+  
+  #THIRD QUANTILE
+  q3_values <- apply(data,2,quantile, probs = 0.75)
+  q3_matrix <- sweep(data, 2, q3_values, "/")
+  q3_matrix[!is.finite(q3_matrix)] <- 0
+  q3_matrix_negprobes<- sweep(q3_matrix , 2, geo_means, "/")
+  q3_matrix_housekeeping<- sweep(q3_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #AREA
+  area_values <- df$Area
+  area_matrix <- sweep(data, 2, area_values, "/")
+  area_matrix[!is.finite(area_matrix)] <- 0
+  area_matrix_negprobes<- sweep(area_matrix , 2, geo_means, "/")
+  area_matrix_housekeeping<- sweep(area_matrix , 2, housekeeping_geo_means, "/")
+  
+  #NUCLEI
+  nuclei_values <- as.integer(df$Nuclei)
+  nuclei_matrix <- sweep(data, 2, nuclei_values, "/")
+  nuclei_matrix[!is.finite(nuclei_matrix)] <- 0
+  nuclei_matrix_negprobes<- sweep(nuclei_matrix , 2, geo_means, "/")
+  nuclei_matrix_housekeeping<- sweep(nuclei_matrix , 2, housekeeping_geo_means, "/")
+  
+  
+  #VST
+  pseudocount <- median(data[data > 0]) / 10 
+  vst_matrix <- log2(data + pseudocount)
+  vst_matrix_negprobes<- sweep(vst_matrix , 2, geo_means, "/")
+  vst_matrix_housekeeping<- sweep(vst_matrix , 2, housekeeping_geo_means, "/")
+  
+  #RLOG 
+  pseudocount <- 1
+  log_data <- log2(data + pseudocount)
+  gene_means <- rowMeans(log_data)
+  gene_sds <- apply(log_data, 1, sd)
+  rlog_matrix<- t(apply(log_data, 1, function(x) (x - mean(x)) / sd(x) * mean(x)))
+  rlog_matrix_negprobes<- sweep(rlog_matrix , 2, geo_means, "/")
+  rlog_matrix_housekeeping<- sweep(rlog_matrix , 2, housekeeping_geo_means, "/")
+  
+  list(
+    CPM = cpm_matrix,
+    TMM = tmm_matrix,
+    LogCPM = log_cpm_matrix,
+    RLOG = rlog_matrix,
+    VST = vst_matrix,
+    Quantile = quantile_matrix,
+    ThirdQuantile = q3_matrix,
+    Area=area_matrix,
+    Nuclei=nuclei_matrix,
+    NegProbes=negativeprobes_normalized_matrix,
+    Housekeeping=housekeeping_normalized_matrix,
+    NegProbes_CPM = cpm_matrix_negprobes,
+    Housekeeping_CPM = cpm_matrix_housekeeping,
+    NegProbes_LogCPM = log_cpm_matrix_negprobes,
+    Housekeeping_LogCPM = log_cpm_matrix_housekeeping,
+    NegProbes_TMM = tmm_matrix_negprobes,
+    Housekeeping_TMM = tmm_matrix_housekeeping,
+    NegProbes_Quantile = quantile_matrix_negprobes,
+    Housekeeping_Quantile = quantile_matrix_housekeeping,
+    NegProbes_ThirdQuantile = q3_matrix_negprobes,
+    Housekeeping_ThirdQuantile = q3_matrix_housekeeping,
+    NegProbes_Area = area_matrix_negprobes,
+    Housekeeping_Area = area_matrix_housekeeping,
+    NegProbes_Nuclei = nuclei_matrix_negprobes,
+    Housekeeping_Nuclei = nuclei_matrix_housekeeping,
+    NegProbes_VST = vst_matrix_negprobes,
+    Housekeeping_VST = vst_matrix_housekeeping,
+    NegProbes_RLOG = rlog_matrix_negprobes,
+    Housekeeping_RLOG = rlog_matrix_housekeeping,
+    Raw=data
+  )
+}
+normalized_matrices <- normalized_matrix(data,df)
+library(edgeR)
+metadata <- data.frame(
+  sampleID  = df$FastqID,
+  condition = factor(df$Condition),
+  batch     = factor(df$N_samples_istologico))
+rownames(metadata) <- metadata$sampleID
+library(metaRNASeq)
+library(SurfR)
+df.FREGAT <- DGE(expression = round(normalized_matrices[["CPM"]]),
+                 metadata = metadata,
+                 Nreplica = min(table(metadata$condition)),
+                 design = "~condition",
+                 condition = "condition",
+                 alpha = 0.05,
+                 TEST = "CR", CTRL =  "NR",
+                 output_tsv = FALSE)
+
+L_fishercomb <- metaRNAseq(ind_deg = list(FREGAT=df.FREGAT,
+                                          OSR=df.OSR),
+                           test_statistic = "fishercomb",
+                           BHth = 0.05,
+                           adjpval.t = 0.05,nrep=c(Replica.FREGAT,Replica.OSR))
+L_invnorm <- metaRNAseq(ind_deg = list(FREGAT=df.FREGAT,
+                                       OSR=df.OSR),
+                        test_statistic = "invnorm",
+                        BHth = 0.05,
+                        adjpval.t = 0.05,
+                        nrep=c(Replica.FREGAT,Replica.OSR))
+metacomb_tumor <- combine_fisher_invnorm(ind_deg = list(FREGAT=df.FREGAT,
+                                                        OSR=df.OSR),
+                                         invnorm = L_invnorm,
+                                         fishercomb = L_fishercomb,
+                                         adjpval = 0.05)
+############################################
+
+df2<-read.table("FinalSignature_STROMA.txt",sep="\t",header=T)
+
+df2_expanded <- df2 %>%
+  separate_rows(GeneInvolved, sep = "/") 
+colnames(df2_expanded)<-c("Pathway","GeneID")
+
+metacomb_stroma<-metacomb_stroma[metacomb_stroma$signFC!="0",]
+# Step 2: Join with df1
+merged_df <- df2_expanded %>%
+  inner_join(metacomb_stroma, by = "GeneID")
+
+merged_df1 <- merged_df %>%
+  pivot_longer(
+    cols = c(FREGAT_log2FC, OSR_log2FC),
+    names_to = "Cohort",
+    names_pattern = "(.*)_log2FC",
+    values_to = "log2FC"
+  )
+
+
+merged_df1$Area<-"Stroma"
+all_merged<-merged_df1
+
+all_merged$Pathway <- factor(
+  all_merged$Pathway,
+  levels = c("Epithelial Mesenchimal transition","Tissue Invasiveness and Plasticity",
+             "GPCR Signaling-Chemokine Signaling"              
+  )
+)
+
+all_merged$Enriched<-"NR"
+all_merged$Enriched[all_merged$Pathway %in% 
+                      c("GPCR Signaling-Chemokine Signaling")]<-"CR"
+
+
+
+
+all_merged$log2FC_z <- scale(all_merged$log2FC)
+all_merged$log2FC_z[all_merged$log2FC>1]<-1
+all_merged$log2FC_z[all_merged$log2FC< -1]<- -1
+merged_stroma<-all_merged
+merged_stroma$Cohort<-factor(merged_stroma$Cohort,levels=c("FREGAT","OSR"))
+p_stroma <- ggplot(merged_stroma, aes(x = GeneID, y = Cohort, fill = log2FC_z)) +
+  
+  geom_tile(color = "white") +
+  
+  facet_grid(
+    . ~ Pathway,
+    scales = "free_x",
+    space = "free_x",
+    labeller = labeller(Pathway = function(x) str_wrap(x, width = 15))
+  ) +
+  
+  scale_fill_gradient2(
+    low = "dodgerblue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "grey90"
+  ) +
+  
+  theme_minimal(base_family = "Arial") +
+  
+  theme(
+    text = element_text(family = "Arial", color = "black"),
+    
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 12, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 14, family = "Arial", color = "black"),
+    
+    axis.title.x = element_text(family = "Arial", color = "black"),
+    axis.title.y = element_text(family = "Arial", color = "black"),
+    
+    strip.text.x = element_text(size = 13, family = "Arial", color = "black"),
+    strip.text.y = element_text(size = 18, family = "Arial", color = "black"),
+    
+    plot.title = element_text(family = "Arial", color = "black"),
+    
+    panel.spacing = unit(0.5, "lines")
+  ) +
+  
+  labs(
+    title = "Stromal areas",
+    x = "Gene",
+    y = "",
+    fill = "Zscore"
+  )
+
+df2<-read.table("FinalSignature_TUMOR.txt",sep="\t",header=T)
+
+df2_expanded <- df2 %>%
+  separate_rows(GeneInvolved, sep = "/") 
+colnames(df2_expanded)<-c("Pathway","GeneID")
+
+metacomb_tumor<-metacomb_tumor[metacomb_tumor$signFC!="0",]
+# Step 2: Join with df1
+merged_df <- df2_expanded %>%
+  inner_join(metacomb_tumor, by = "GeneID")
+
+merged_df1 <- merged_df %>%
+  pivot_longer(
+    cols = c(FREGAT_log2FC, OSR_log2FC),
+    names_to = "Cohort",
+    names_pattern = "(.*)_log2FC",
+    values_to = "log2FC"
+  )
+
+
+
+all_merged<-merged_df1
+all_merged$Pathway<-gsub("Differentiation","Cell proliferation",all_merged$Pathway)
+all_merged$Pathway<-gsub("VEGF Signaling","VEGF      Signaling",all_merged$Pathway)
+all_merged$Pathway <- factor(
+  all_merged$Pathway,
+  levels = c("VEGF      Signaling","Lipid metabolism","Cell proliferation",
+             "Interleukin Signaling","Neutrophil degranulation","TCR Signaling"      
+  )
+)
+
+all_merged$Enriched<-"NR"
+all_merged$Enriched[all_merged$Pathway %in% 
+                      c("Interleukin Signaling","Neutrophil degranulation","TCR Signaling" )]<-"CR"
+
+
+
+
+all_merged$log2FC_z <- scale(all_merged$log2FC)
+all_merged$log2FC_z[all_merged$log2FC>1]<-1
+all_merged$log2FC_z[all_merged$log2FC< -1]<- -1
+merged_tumor<-all_merged
+merged_tumor$Cohort<-factor(merged_tumor$Cohort,levels=c("FREGAT","OSR"))
+p_tumor <- ggplot(merged_tumor, aes(x = GeneID, y = Cohort, fill = log2FC_z)) +
+  
+  geom_tile(color = "white") +
+  
+  facet_grid(
+    . ~ Pathway,
+    scales = "free_x",
+    space = "free_x",
+    labeller = labeller(Pathway = function(x) str_wrap(x, width = 15))
+  ) +
+  
+  scale_fill_gradient2(
+    low = "dodgerblue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "grey90"
+  ) +
+  
+  theme_minimal(base_family = "Arial") +
+  
+  theme(
+    text = element_text(family = "Arial", color = "black"),
+    
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 12, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 14, family = "Arial", color = "black"),
+    
+    axis.title.x = element_text(family = "Arial", color = "black"),
+    axis.title.y = element_text(family = "Arial", color = "black"),
+    
+    strip.text.x = element_text(size = 13, family = "Arial", color = "black"),
+    strip.text.y = element_text(size = 18, family = "Arial", color = "black"),
+    
+    plot.title = element_text(family = "Arial", color = "black"),
+    
+    panel.spacing = unit(0.5, "lines")
+  ) +
+  
+  labs(
+    title = "Tumoral areas",
+    x = "Gene",
+    y = "",
+    fill = "Zscore"
+  )
+
+# ----------------------------
+# Combine plots side by side
+# ----------------------------
+library(patchwork)
+combined_plot <- p_tumor+ p_stroma  + plot_layout(ncol = 1, guides = "collect") & 
+  theme(legend.position = "none")
+
+combined_plot
+
+p_stroma
+p_tumor
+
+
+##############################################
