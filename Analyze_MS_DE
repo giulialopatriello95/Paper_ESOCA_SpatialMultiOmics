@@ -149,3 +149,38 @@ DE_results <- topTable(
   number = Inf,
   sort.by = "P"
 )
+
+
+
+mart <- useMart(biomart="ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+# mart <- useEnsembl(biomart = "genes",
+#           dataset = "hsapiens_gene_ensembl")
+
+library(biomaRt)
+# 
+#  mart <- useMart(
+#    biomart = "ENSEMBL_MART_ENSEMBL",
+#    dataset = "hsapiens_gene_ensembl",
+#    host = "https://jul2023.archive.ensembl.org"
+# #   version = 110 
+# # # # # host = "https://uswest.ensembl.org"
+#   )
+
+listAttributes(mart)
+mapping <- getBM(
+  attributes = c("uniprot_gn_id", "hgnc_symbol"),
+  filters = "uniprot_gn_id",
+  values = rownames(DE_results),
+  mart = mart
+)
+
+# merge with DE results
+DE_results$SwissProt <- rownames(DE_results)
+
+DE_annotated <- merge(
+  DE_results,
+  mapping,
+  by.x = "SwissProt",
+  by.y = "uniprot_gn_id",
+  all.x = TRUE
+)
