@@ -1,0 +1,73 @@
+dcc_files <- list.files(path = root_dir, pattern = "\\.dcc$", full.names = TRUE, recursive = TRUE)
+
+# Function to extract and parse <Code_Summary> content into a data frame
+extract_code_summary <- function(file) {
+  # Read all lines from the file
+  lines <- readLines(file)
+  
+  # Find the lines containing <Code_Summary> and </Code_Summary>
+  start <- grep("<Code_Summary>", lines)
+  end <- grep("</Code_Summary>", lines)
+  
+  # Extract the lines between the tags
+  if (length(start) > 0 && length(end) > 0 && start < end) {
+    content <- lines[(start + 1):(end - 1)]  # Exclude the tags themselves
+    
+    # Convert content into a data frame assuming "probe counts" are tab-separated
+    content_df <- read.table(text = content, header = FALSE, sep = ",",
+                             col.names = c("Probe", "Counts"), stringsAsFactors = FALSE)
+    return(content_df)
+  } else {
+    return(data.frame(Probe = character(), Counts = numeric()))  # Empty data frame
+  }
+}
+
+# Step 1: Extract data from all DCC files
+code_summary_list <- lapply(dcc_files, extract_code_summary)
+
+# Step 2: Get all unique probes across all files
+all_probes <- unique(unlist(lapply(code_summary_list, function(x) x$Probe)))
+
+# Step 3: Initialize a matrix to store counts
+count_matrix <- matrix(0, nrow = length(all_probes), ncol = length(dcc_files),
+                       dimnames = list(all_probes, basename(dcc_files)))
+
+# Step 4: Populate the matrix with counts
+for (i in seq_along(dcc_files)) {
+  file_data <- code_summary_list[[i]]
+  if (nrow(file_data) > 0) {
+    # Match probes and update counts
+    count_matrix[file_data$Probe, i] <- file_data$Counts
+  }
+}
+
+# View the resulting matrix
+print(count_matrix)
+
+# Optionally, save the matrix as a CSV file
+write.csv(count_matrix, file = "combined_code_summary_matrix.csv", row.names = TRUE)
+
+df<-read.delim("sample_table.txt",header = T)
+df$FastqID<-gsub("=.*","",df$FastqID)
+df$FastqID<-gsub(" ","",df$FastqID)
+colnames(count_matrix)<-gsub(".dcc","",colnames(count_matrix))
+intersect(df$FastqID,colnames(count_matrix))
+#chi è CR e NR
+df$Condition<-"NR"
+df$Condition[df$ID_Sample_Slide_ID %in% c("01A-0485","01A-0481","01A-0523")]<-"CR"
+
+#convert in matrice di geni
+probe<-read.delim("new_probelist.txt",header = F)
+
+count_matrix<-count_matrix[intersect(rownames(count_matrix),probe$V2),]
+probe<-probe[probe$V2 %in% intersect(rownames(count_matrix),probe$V2),]
+rownames(count_matrix)<-probe$V1
+exon_sample_matrix<-count_matrix
+
+gene_ids<- ifelse(grepl("NegativeProbe", rownames(exon_sample_matrix)), rownames(exon_sample_matrix), sub("_.*", "", rownames(exon_sample_matrix)))
+sum(grepl("NegativeProbe",gene_ids))
+gene_sample_matrix<-rowsum(exon_sample_matrix, gene_ids)
+
+
+
+write.csv(gene_sample_matrix, file = "gene_matrix.csv", row.names = TRUE)
