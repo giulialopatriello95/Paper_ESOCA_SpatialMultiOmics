@@ -1,11 +1,62 @@
+gene_sample_matrix <- read_excel(
+  "GeoMX_Raw_matrix.xlsx",sheet=1
+)
+
+df <- read_excel(
+  "GeoMX_metadata.xlsx",sheet=1
+)
+gene_sample_matrix<-as.data.frame(gene_sample_matrix)
+rownames(gene_sample_matrix)<-gene_sample_matrix$Gene
+gene_sample_matrix<-gene_sample_matrix[,df$library_name]
+
+
+
+
+
+df$merge <- ""
+
+df$merge[df$markers %in% c("CD45", "CD68")] <- paste("STROMA", df$title[df$markers %in% c("CD45", "CD68")], sep = "_")
+
+df$merge[df$markers == "PanCK"] <- paste("TUMOR", df$title[df$markers == "PanCK"], sep = "_")
+
+group_vector<-df$merge
+counts_t <- as.data.frame(t(gene_sample_matrix))
+counts_t$Group <- group_vector
+
+# Aggregate by group
+merged_counts <- aggregate(. ~ Group, data = counts_t, FUN = sum)
+
+# Transpose back to original format
+merged_counts <- as.data.frame(t(merged_counts[-1]))
+colnames(merged_counts) <- merged_counts[1,]
+merged_counts <- merged_counts[-1,]
+print(merged_counts)
+
+dim(merged_counts)
+colnames(merged_counts)<-unique(df$merge)
+gene_sample_matrix<-merged_counts
+
+
+cols_to_remove <- c("library_name", "title","markers")
+
+df <- df %>%
+  select(-all_of(cols_to_remove))
+df$Segment_Name<-""
+df$Segment_Name[grepl("STROMA",df$merge)]<-"STROMA"
+df$Segment_Name[grepl("TUMORE",df$merge)]<-"TUMORE"
+
+df<-unique(df)
+
+
+
+
 library(dplyr)
 library(tidyr)
 library(edgeR)
 library(DESeq2)
 
 df<-df[df$Segment_Name=="STROMA",]
-#df<-df[df$Batch=="OSR",]
-#df<-df[df$ID_Sample_Slide_ID!="75299 (#4)",]
+df$N_samples_istologico<- sub(" .*", "", df$merge)
 gene_sample_matrix<-merged_counts[,df$merge]
 
 data <- as.integer(as.matrix(gene_sample_matrix))
@@ -19,11 +70,7 @@ colnames(integer_matrix) <- colnames(gene_sample_matrix)
 
 data<-integer_matrix
 
-#corrected_matrix <- removeBatchEffect(data,batch=df$N_samples_istologico,group=df$Condition)
-#data<-corrected_matrix
-#data[!is.finite(data)]<-0
 
-# Normalization function row gene and col sample
 normalized_matrix <- function(data,df) {
   
   #Negative probes
@@ -43,92 +90,10 @@ normalized_matrix <- function(data,df) {
   cpm_matrix_negprobes<- sweep(cpm_matrix, 2, geo_means, "/")
   cpm_matrix_housekeeping<- sweep(cpm_matrix, 2, housekeeping_geo_means, "/")
   
-  #LOG CPM Normalization
-  log_cpm_matrix <- log2(cpm_matrix + 1)
-  log_cpm_matrix_negprobes<- sweep(log_cpm_matrix, 2, geo_means, "/")
-  log_cpm_matrix_housekeeping<- sweep(log_cpm_matrix, 2, housekeeping_geo_means, "/")
-  
-  #TMM Normalization 
-  dge <- DGEList(counts = data)
-  dge <- calcNormFactors(dge, method = "TMM")
-  tmm_matrix <- cpm(dge)
-  tmm_matrix_negprobes<- sweep(tmm_matrix, 2, geo_means, "/")
-  tmm_matrix_housekeeping<- sweep(tmm_matrix, 2, housekeeping_geo_means, "/")  
-  
-  
-  #QUANTILE
-  quantile_matrix<-normalizeBetweenArrays(data, method = "quantile")
-  quantile_matrix_negprobes<- sweep(quantile_matrix, 2, geo_means, "/")
-  quantile_matrix_housekeeping<- sweep(quantile_matrix, 2, housekeeping_geo_means, "/")  
-  
-  #THIRD QUANTILE
-  q3_values <- apply(data,2,quantile, probs = 0.75)
-  q3_matrix <- sweep(data, 2, q3_values, "/")
-  q3_matrix[!is.finite(q3_matrix)] <- 0
-  q3_matrix_negprobes<- sweep(q3_matrix , 2, geo_means, "/")
-  q3_matrix_housekeeping<- sweep(q3_matrix , 2, housekeeping_geo_means, "/")
-  
-  
-  #AREA
-  area_values <- df$Area
-  area_matrix <- sweep(data, 2, area_values, "/")
-  area_matrix[!is.finite(area_matrix)] <- 0
-  area_matrix_negprobes<- sweep(area_matrix , 2, geo_means, "/")
-  area_matrix_housekeeping<- sweep(area_matrix , 2, housekeeping_geo_means, "/")
-  
-  #NUCLEI
-  nuclei_values <- as.integer(df$Nuclei)
-  nuclei_matrix <- sweep(data, 2, nuclei_values, "/")
-  nuclei_matrix[!is.finite(nuclei_matrix)] <- 0
-  nuclei_matrix_negprobes<- sweep(nuclei_matrix , 2, geo_means, "/")
-  nuclei_matrix_housekeeping<- sweep(nuclei_matrix , 2, housekeeping_geo_means, "/")
-  
-  
-  #VST
-  pseudocount <- median(data[data > 0]) / 10 
-  vst_matrix <- log2(data + pseudocount)
-  vst_matrix_negprobes<- sweep(vst_matrix , 2, geo_means, "/")
-  vst_matrix_housekeeping<- sweep(vst_matrix , 2, housekeeping_geo_means, "/")
-  
-  #RLOG 
-  pseudocount <- 1
-  log_data <- log2(data + pseudocount)
-  gene_means <- rowMeans(log_data)
-  gene_sds <- apply(log_data, 1, sd)
-  rlog_matrix<- t(apply(log_data, 1, function(x) (x - mean(x)) / sd(x) * mean(x)))
-  rlog_matrix_negprobes<- sweep(rlog_matrix , 2, geo_means, "/")
-  rlog_matrix_housekeeping<- sweep(rlog_matrix , 2, housekeeping_geo_means, "/")
+ 
   
   list(
     CPM = cpm_matrix,
-    TMM = tmm_matrix,
-    LogCPM = log_cpm_matrix,
-    RLOG = rlog_matrix,
-    VST = vst_matrix,
-    Quantile = quantile_matrix,
-    ThirdQuantile = q3_matrix,
-    Area=area_matrix,
-    Nuclei=nuclei_matrix,
-    NegProbes=negativeprobes_normalized_matrix,
-    Housekeeping=housekeeping_normalized_matrix,
-    NegProbes_CPM = cpm_matrix_negprobes,
-    Housekeeping_CPM = cpm_matrix_housekeeping,
-    NegProbes_LogCPM = log_cpm_matrix_negprobes,
-    Housekeeping_LogCPM = log_cpm_matrix_housekeeping,
-    NegProbes_TMM = tmm_matrix_negprobes,
-    Housekeeping_TMM = tmm_matrix_housekeeping,
-    NegProbes_Quantile = quantile_matrix_negprobes,
-    Housekeeping_Quantile = quantile_matrix_housekeeping,
-    NegProbes_ThirdQuantile = q3_matrix_negprobes,
-    Housekeeping_ThirdQuantile = q3_matrix_housekeeping,
-    NegProbes_Area = area_matrix_negprobes,
-    Housekeeping_Area = area_matrix_housekeeping,
-    NegProbes_Nuclei = nuclei_matrix_negprobes,
-    Housekeeping_Nuclei = nuclei_matrix_housekeeping,
-    NegProbes_VST = vst_matrix_negprobes,
-    Housekeeping_VST = vst_matrix_housekeeping,
-    NegProbes_RLOG = rlog_matrix_negprobes,
-    Housekeeping_RLOG = rlog_matrix_housekeeping,
     Raw=data
   )
 }
@@ -139,8 +104,8 @@ normalized_matrices <- normalized_matrix(data,df)
 library(reshape2)
 
 for (norm_name in names(normalized_matrices)) {
-  #corrected_matrix <- removeBatchEffect(normalized_matrices[[norm_name]],batch=df$Batch, batch2=df$N_samples_istologico,group=df$Condition)
-  corrected_matrix <- removeBatchEffect(normalized_matrices[[norm_name]],batch=df$N_samples_istologico,group=df$Condition)
+
+  corrected_matrix <- removeBatchEffect(normalized_matrices[[norm_name]],batch=df$N_samples_istologico,group=df$response)
   
   normalized_matrices[[norm_name]]<-corrected_matrix
 }
@@ -173,16 +138,12 @@ reference<-reference[,!grepl("erythroid",colnames(reference))]
 results <- spatialdecon(
   norm = gene_counts,
   bg=bg,
-   X=reference,
+  X=reference,
   raw = raw
   #is_pure_tumor = T,cell_counts = as.integer(df$Nuclei)
 )
 
 
-dim(safeTME)
-length(intersect(rownames(gene_counts),rownames(safeTME)))
-length(intersect(rownames(gene_counts),rownames(reference)))
-dim(reference)
 
 # Advanced plotting with ggplot2
 library(ggplot2)
@@ -193,12 +154,9 @@ melted<-melt(proportions_df)
 melted$value<-100*melted$value
 
 melted<-merge(melted,df,by.x="variable",by.y = "merge")
-#melted<-melted[melted$Batch=="OSR",]
-#melted<-melted %>%
-#  group_by(variable) %>%
-#  mutate(perc=100*(value/sum(value)))
+
 library(ggpubr)
-#melted<-melted[melted$Response %in% c("No response","Complete response"),]
+
 library(stringr)
 melted$merge <- str_wrap(melted$merge, width = 10)
 melted<-melted[melted$merge %in% c("blood.vessel.cell","CD27+.B.cell","dendritic.cell",
@@ -211,27 +169,10 @@ melted$merge<-gsub("natural.killer.cell.CD8\\+.cytotoxic.T.cell","Cytotoxic T",m
 melted$merge<-gsub("\\.", " ",melted$merge)
 melted$merge<-gsub("NK CD8\\+ cytotoxic T cell","NK Cytotoxic T",melted$merge)
 melted1<-melted
-p1<-ggboxplot(melted, x = "merge", y = "value", 
-          #        add = c("jitter"),
-          color = "Condition")+
-  # add.params = list(alpha = 0.5, size = 1.5)) +  # lighter jitter points
-  stat_compare_means(aes(group = Condition),
-                     label = "p.format",
-                     method = "t.test") + # move p-value labels up
-  theme_minimal(base_size = 14) +   # improve font size
-  theme(axis.text.x = element_text(angle = 90, hjust = 1,size=14), # angled labels
-        panel.grid.major.x = element_blank(),              # remove vertical grid
-        panel.grid.minor = element_blank(),
-        strip.text = element_text(face = "bold", size = 12),legend.position = "none") +
-  labs(#title = "Mean 20 neighbours \nCounts by Condition",
-    x = "",
-    y = "% of cells") +
-  facet_grid(rows=vars(Batch), scales = "free_x", space = "free_x")
-p1
 
 colnames(reference)
 reference<-safeTME
-#reference<-reference[,grepl("CAF",colnames(reference))]
+
 length(intersect(rownames(reference),rownames(gene_counts)))
 pool_names<-rownames(gene_sample_matrix[grepl("Neg",rownames(gene_sample_matrix)),])
 bg = derive_GeoMx_background(norm = normalized_matrices$CPM,
@@ -245,7 +186,7 @@ reference<-reference[,!grepl("erythroid",colnames(reference))]
 results <- spatialdecon(
   norm = gene_counts,
   bg=bg,
-# X=reference,
+  # X=reference,
   raw = raw
   #is_pure_tumor = T,cell_counts = as.integer(df$Nuclei)
 )
@@ -265,31 +206,11 @@ melted<-melt(proportions_df)
 melted$value<-100*melted$value
 
 melted<-merge(melted,df,by.x="variable",by.y = "merge")
-#melted<-melted[melted$Batch=="OSR",]
-#melted<-melted %>%
-#  group_by(variable) %>%
-#  mutate(perc=100*(value/sum(value)))
+
 library(ggpubr)
-#melted<-melted[melted$Response %in% c("No response","Complete response"),]
+
 library(stringr)
 melted$merge <- str_wrap(melted$merge, width = 10)
-
-ggboxplot(melted, x = "merge", y = "value", 
-          #        add = c("jitter"),
-          color = "Condition")+
-  # add.params = list(alpha = 0.5, size = 1.5)) +  # lighter jitter points
-  stat_compare_means(aes(group = Condition),
-                     label = "p.format",
-                     method = "t.test") + # move p-value labels up
-  theme_minimal(base_size = 14) +   # improve font size
-  theme(axis.text.x = element_text(angle = 90, hjust = 1,size=14), # angled labels
-        panel.grid.major.x = element_blank(),              # remove vertical grid
-        panel.grid.minor = element_blank(),
-        strip.text = element_text(face = "bold", size = 12),legend.position = "none") +
-  labs(#title = "Mean 20 neighbours \nCounts by Condition",
-    x = "",
-    y = "% of cells") +
-  facet_grid(rows=vars(Batch), scales = "free_x", space = "free_x")
 
 
 melted$merge<-gsub("natural.killer.cell","NK",melted$merge)
@@ -301,17 +222,21 @@ melted<-melted[melted$merge %in% c("NK","macrophages",
 melted$merge<-gsub("plasma","plasmacells",melted$merge)
 melted$merge<-gsub("\\.", " ",melted$merge)
 melted_all<-rbind(melted1,melted)
+
+
+
+
 melted_all$merge<-gsub("blood vessel cell","Endothelials",melted_all$merge)
 melted_all$merge<-gsub("NK Cytotoxic T","NK",melted_all$merge)
 melted_all$merge<-gsub("T CD4 memory","T CD4+ memory",melted_all$merge)
 melted_all$merge<-gsub("plasmacells","ASC B cells",melted_all$merge)
 melted_all$merge<-factor(melted_all$merge,levels=sort(unique(melted_all$merge)))
-melted_all$Batch<-factor(melted_all$Batch,levels=c("OSR","FREGAT"))
+melted_all$batch<-factor(melted_all$batch,levels=c("OSR","FREGAT"))
 melted_all<-melted_all[melted_all$merge %in% c("ASC B cells","T CD4+ memory",
                                                "macrophages","NK"),]
 ggboxplot(melted_all, x = "merge", y = "value", 
-  #        add = c("jitter"),
-          color = "Condition")+xlab("Cell type")+ylab("% of cells")+ 
+          #        add = c("jitter"),
+          color = "response")+xlab("Cell type")+ylab("% of cells")+ 
   theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1,size=17,family = "Arial"),
         axis.text.y = element_text(family = "Arial",size=15),
         axis.title = element_text(family = "Arial",size=19),
@@ -324,108 +249,6 @@ ggboxplot(melted_all, x = "merge", y = "value",
         legend.title = element_text(family = "Arial"),
         legend.text = element_text(family = "Arial"), 
         panel.spacing.y = unit(1.5, "lines"),legend.position = "none")+
-  stat_compare_means(aes(group = Condition), method = "t.test",label = "p.format")+
-  ylim(0,50)+
-  facet_grid(cols=vars(Batch),switch = "x")+ylim(0,20)
-
-
-melted$Cond<-paste(melted$Condition,melted$Batch)
-melted$merge<-gsub("NK Cytotoxic T","Cytotoxic T",melted$merge)
-melted$merge<-gsub("T CD4 memory", "Memory CD4",melted$merge)
-ggboxplot(melted, x = "merge", y = "value", 
-          #        add = c("jitter"),
-          color = "Cond")+xlab("Cluster")+ylab("% of cells")+ 
-  theme(axis.text.x = element_text(angle = 90,size=11))+scale_color_manual(
-    values=c(
-      "CR FREGAT" = "#FFB6C1",  # light pink
-      "CR OSR"    = "#FF69B4",  # hot pink
-      "NR FREGAT" = "dodgerblue",  # light blue
-      "NR OSR"    = "darkblue"   # sky blue
-    )
-  )
-
-
-melted2<-melted
-p2<-ggboxplot(melted, x = "merge", y = "value", 
-          #        add = c("jitter"),
-          color = "Condition")+
-  # add.params = list(alpha = 0.5, size = 1.5)) +  # lighter jitter points
-  stat_compare_means(aes(group = Condition),
-                     label = "p.signif",
-                     method = "t.test" ) + # move p-value labels up
-  theme_minimal(base_size = 14) +   # improve font size
-  theme(axis.text.x = element_text(angle = 90, hjust = 1,size=14), # angled labels
-        panel.grid.major.x = element_blank(),              # remove vertical grid
-        panel.grid.minor = element_blank(),
-        strip.text = element_text(face = "bold", size = 12)) +
-  labs(#title = "Mean 20 neighbours \nCounts by Condition",
-    x = "",
-    y = "% of cells") +
-  facet_grid(rows=vars(Batch), scales = "free_x", space = "free_x")
-
-
-library(patchwork)
-
-p1 | p2
-
-
-melted_all<-rbind(melted1,melted2)
-melted_all<-melted_all[melted_all$merge!="dendritic cell",]
-melted_all<-melted_all[melted_all$merge!="CD8+ T cell",]
-melted_all<-melted_all[melted_all$merge!="CD4+ T cell",]
-melted_all<-melted_all[melted_all$merge!="neutrophils",]
-melted_all$merge<-gsub("blood vessel cell","Endo",melted_all$merge)
-melted_all$merge<-gsub("macrophages","Macro",melted_all$merge)
-melted_all$merge<-gsub("plasmacells","Plasma",melted_all$merge)
-levels(melted_all$merge)<-c("Macro","Endo",
-                            "memory B","Cytotoxic T","Plasma",
-                            "NK","T CD4 memory")
-melted_all$merge<-as.factor(melted_all$merge)
-ggboxplot(melted_all, x ="merge", y = "value", 
-          #        add = c("jitter"),
-          color = "Condition")+
-  # add.params = list(alpha = 0.5, size = 1.5)) +  # lighter jitter points
-  stat_compare_means(aes(group = Condition),
-                     label = "p.signif",
-                     method = "t.test") + # move p-value labels up label.y = -Inf 
-  theme_minimal(base_size = 14) +   # improve font size
-  theme(axis.text.x = element_text(angle =45, vjust=1,hjust = 0.85,size=15,margin = margin(t = 5)), # angled labels
-        panel.grid.major.x = element_blank(),              # remove vertical grid
-        panel.grid.minor = element_blank(),
-        strip.text = element_text(face = "bold", size = 12)) +
-  labs(#title = "Mean 20 neighbours \nCounts by Condition",
-    x = "",
-    y = "% of cells") +
-  facet_grid(rows=vars(Batch), scales = "free_x", space = "free_x")
-
-matching = list()
-matching$epithelia<-c("stratified.epithelial.cell","suprabasal.epithelial.cell","upper.epithelial.cell","basal.epithelial.cell")             
-matching$dentric.cells<-c("dendritic.cell")                      
-matching$T.cell<-c("CD8+.T.cell","CD4+.T.cell","natural.killer.cell.CD8+.cytotoxic.T.cell")   
-matching$Myeloid<-c("monocyte.macrophage","mast.cell")
-matching$Angiogenesis<-c("lymph.vessel.cell","blood.vessel.cell")                       
-matching$Stroma<-c("stromal.cell")
-matching$Submucosal<-c("submucosal.gland.mucous.cell","submucosal.gland.duct.cell")               
-matching$B.cell<-c("CD27+.B.cell","CD27-.B.cell")  
-res1 =  collapseCellTypes(fit = results, 
-                                 matching = matching)
-
-proportions_df <- as.data.frame(res1$prop_of_all)
-proportions_df$merge <- rownames(proportions_df)
-library(reshape2)
-melted<-melt(proportions_df)
-melted$value<-100*melted$value
-
-melted<-merge(melted,df,by.x="variable",by.y = "merge")
-
-#melted<-melted %>%
-#  group_by(variable) %>%
-#  mutate(perc=100*(value/sum(value)))
-library(ggpubr)
-#melted<-melted[melted$Response %in% c("No response","Complete response"),]
-ggboxplot(melted, x = "merge", y = "value", 
-          add = c("jitter"),
-          color = "Condition")+xlab("Cluster")+ylab("% of tumoral cells")+ 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
-  stat_compare_means(aes(group = Condition), method = "t.test",label = "p.signif")
-
+  stat_compare_means(aes(group = response), method = "t.test",label = "p.format")+
+#  ylim(0,50)+
+  facet_grid(cols=vars(batch),switch = "x")+ylim(0,20)
