@@ -287,213 +287,46 @@ no.dups = TRUE
 # ------------------------------------------------------------------------------
 
 # Initialize the patient column.
-
-metadata_merged$Patient <- ""
-
-# Patient assignment is based on the CosMx sample/FOV and the spatial
-
-# coordinate boundaries separating the individual patient regions.
-
-metadata_merged$Patient[
-metadata_merged$sample == "1LB" &
-metadata_merged$y < 10000
-] <- "CR8459"
-
-metadata_merged$Patient[
-metadata_merged$sample == "1LB" &
-metadata_merged$y > 10000
-] <- "NR3014"
-
-metadata_merged$Patient[
-metadata_merged$sample == "3LB" &
-metadata_merged$y < 10000
-] <- "CR6290"
-
-metadata_merged$Patient[
-metadata_merged$sample == "3LB" &
-metadata_merged$y > 10000
-] <- "NR1231"
-
-metadata_merged$Patient[
-metadata_merged$sample == "6LB" &
-metadata_merged$y < 10000
-] <- "CR6858"
-
-metadata_merged$Patient[
-metadata_merged$sample == "6LB" &
-metadata_merged$y > 10000
-] <- "NR2591"
-
-metadata_merged$Patient[
-metadata_merged$sample == "7LB" &
-metadata_merged$y < 10000
-] <- "CCR3440"
-
-metadata_merged$Patient[
-metadata_merged$sample == "7LB" &
-metadata_merged$y > 10000
-] <- "NR3497"
-
-metadata_merged$Patient[
-metadata_merged$sample == "9LB" &
-metadata_merged$y < 10000
-] <- "CR9404"
-
-metadata_merged$Patient[
-metadata_merged$sample == "9LB" &
-metadata_merged$y > 10000
-] <- "NR0744"
-
-metadata_merged$Patient[
-metadata_merged$sample == "11LB" &
-metadata_merged$y < 10000
-] <- "CR1764"
-
-metadata_merged$Patient[
-metadata_merged$sample == "11LB" &
-metadata_merged$y > 10000
-] <- "NR4406"
-
-metadata_merged$Patient[
-metadata_merged$sample == "13LB" &
-metadata_merged$y < 10000
-] <- "CR6004"
-
-metadata_merged$Patient[
-metadata_merged$sample == "13LB" &
-metadata_merged$y > 10000
-] <- "NR7418"
-
-metadata_merged$Patient[
-metadata_merged$sample == "15LB" &
-metadata_merged$y < 10000
-] <- "CR6563"
-
-metadata_merged$Patient[
-metadata_merged$sample == "15LB" &
-metadata_merged$y > 10000
-] <- "NR5037"
-
-metadata_merged$Patient[
-metadata_merged$sample == "17LB" &
-metadata_merged$y < 10000
-] <- "CR1034"
-
-metadata_merged$Patient[
-metadata_merged$sample == "17LB" &
-metadata_merged$y > 10000
-] <- "NR6466"
-
-metadata_merged$Patient[
-metadata_merged$sample == "19LB" &
-metadata_merged$y < 10000
-] <- "CR2410"
-
-metadata_merged$Patient[
-metadata_merged$sample == "19LB" &
-metadata_merged$y > 10000
-] <- "NR2875"
-
-metadata_merged$Patient[
-metadata_merged$sample == "21LB" &
-metadata_merged$y < 10000
-] <- "CR9418"
-
-metadata_merged$Patient[
-metadata_merged$sample == "21LB" &
-metadata_merged$y > 10000
-] <- "NR2059"
-
-metadata_merged$Patient[
-metadata_merged$sample == "23LB" &
-metadata_merged$y < 10000
-] <- "CR4291"
-
-metadata_merged$Patient[
-metadata_merged$sample == "23LB" &
-metadata_merged$y > 10000
-] <- "NR7252"
-
-metadata_merged$Patient[
-metadata_merged$sample == "25LB" &
-metadata_merged$y < 10000
-] <- "CR4423"
-
-metadata_merged$Patient[
-metadata_merged$sample == "25LB" &
-metadata_merged$y > 10000
-] <- "NR6833"
-
-metadata_merged$Patient[
-metadata_merged$sample == "27LB" &
-metadata_merged$y < 10000
-] <- "CR5726"
-
-metadata_merged$Patient[
-metadata_merged$sample == "27LB" &
-metadata_merged$y > 10000
-] <- "NR8347"
-
-# Additional samples containing multiple patient regions.
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075293" &
-metadata_merged$y > 10000
-] <- "NR21-I-11925"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075293" &
-metadata_merged$y < 10000
-] <- "CR21-I-11612"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075292" &
-metadata_merged$y > 15000
-] <- "CR52010783"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075292" &
-metadata_merged$y < 15000 &
-metadata_merged$y > 5000
-] <- "NR51929838"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075292" &
-metadata_merged$y < 5000
-] <- "NR51800155"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075298" &
-metadata_merged$y < 5000
-] <- "CR51806411"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075298" &
-metadata_merged$y > 5000 &
-metadata_merged$y < 15000
-] <- "NR21-I-28696"
-
-metadata_merged$Patient[
-metadata_merged$sample == "00075298" &
-metadata_merged$y > 15000
-] <- "NR22-I-09272"
-
-metadata_merged$Patient[
-metadata_merged$sample == "7599_part2" &
-metadata_merged$y < 5000
-] <- "CR24-I-00321"
-
-metadata_merged$Patient[
-metadata_merged$sample == "7599_part2" &
-metadata_merged$y > 5000 &
-metadata_merged$y < 15000
-] <- "NR24-I-01034"
-
-metadata_merged$Patient[
-metadata_merged$sample == "7599_part2" &
-metadata_merged$y > 15000
-] <- "NR24-I-14933"
-
+metadata_merged$Patient<-""
+metadata_merged$Patient[metadata_merged$sample=="1LB" & metadata_merged$y < 10000]<-"CR01A-0381"
+metadata_merged$Patient[metadata_merged$sample=="1LB" & metadata_merged$y > 10000]<-"NR01A-0332"
+metadata_merged$Patient[metadata_merged$sample=="3LB" & metadata_merged$y < 10000]<-"CR01A-0432"
+metadata_merged$Patient[metadata_merged$sample=="3LB" & metadata_merged$y > 10000]<-"NR01A-1024"
+metadata_merged$Patient[metadata_merged$sample=="6LB" & metadata_merged$y < 10000]<-"CR01A-0619"
+metadata_merged$Patient[metadata_merged$sample=="6LB" & metadata_merged$y > 10000]<-"NR01A-0330"
+metadata_merged$Patient[metadata_merged$sample=="7LB" & metadata_merged$y < 10000]<-"CR01A-0030"
+metadata_merged$Patient[metadata_merged$sample=="7LB" & metadata_merged$y > 10000]<-"NR01A-0356"
+metadata_merged$Patient[metadata_merged$sample=="9LB" & metadata_merged$y < 10000]<-"CR01A-0565"
+metadata_merged$Patient[metadata_merged$sample=="9LB" & metadata_merged$y > 10000]<-"NR01A-0845"
+metadata_merged$Patient[metadata_merged$sample=="11LB" & metadata_merged$y < 10000]<-"CR01A-0614"
+metadata_merged$Patient[metadata_merged$sample=="11LB" & metadata_merged$y > 10000]<-"NR01A-0936"
+metadata_merged$Patient[metadata_merged$sample=="13LB" & metadata_merged$y < 10000]<-"CR01A-0849"
+metadata_merged$Patient[metadata_merged$sample=="13LB" & metadata_merged$y > 10000]<-"NR01A-1175"
+metadata_merged$Patient[metadata_merged$sample=="15LB" & metadata_merged$y < 10000]<-"CR01A-0954"
+metadata_merged$Patient[metadata_merged$sample=="15LB" & metadata_merged$y > 10000]<-"NR01A-1348"
+metadata_merged$Patient[metadata_merged$sample=="17LB" & metadata_merged$y < 10000]<-"CR01A-0926"
+metadata_merged$Patient[metadata_merged$sample=="17LB" & metadata_merged$y > 10000]<-"NR6466"
+metadata_merged$Patient[metadata_merged$sample=="19LB" & metadata_merged$y < 10000]<-"CR01A-0221"
+metadata_merged$Patient[metadata_merged$sample=="19LB" & metadata_merged$y > 10000]<-"NR01A-0028"
+metadata_merged$Patient[metadata_merged$sample=="21LB" & metadata_merged$y < 10000]<-"CR01A-0447"
+metadata_merged$Patient[metadata_merged$sample=="21LB" & metadata_merged$y > 10000]<-"NR01A-0218"
+metadata_merged$Patient[metadata_merged$sample=="23LB" & metadata_merged$y < 10000]<-"CR01A-0481"
+metadata_merged$Patient[metadata_merged$sample=="23LB" & metadata_merged$y > 10000]<-"NR01A-0373"
+metadata_merged$Patient[metadata_merged$sample=="25LB" & metadata_merged$y < 10000]<-"CR01A-0485"
+metadata_merged$Patient[metadata_merged$sample=="25LB" & metadata_merged$y > 10000]<-"NR01A-0435"
+metadata_merged$Patient[metadata_merged$sample=="27LB" & metadata_merged$y < 10000]<-"CR01A-0498"
+metadata_merged$Patient[metadata_merged$sample=="27LB" & metadata_merged$y > 10000]<-"NR01A-0508"
+metadata_merged$Patient[metadata_merged$sample=="00075293" & metadata_merged$y > 10000]<-"NRESOCA55"
+metadata_merged$Patient[metadata_merged$sample=="00075293" & metadata_merged$y < 10000]<-"CRESOCA54"
+metadata_merged$Patient[metadata_merged$sample=="00075292" & metadata_merged$y > 15000]<-"CRESOCA43"
+metadata_merged$Patient[metadata_merged$sample=="00075292" & metadata_merged$y < 15000 & metadata_merged$y > 5000]<-"NRESOCA35"
+metadata_merged$Patient[metadata_merged$sample=="00075292" & metadata_merged$y < 5000]<-"NRESOCA8"
+metadata_merged$Patient[metadata_merged$sample=="00075298" & metadata_merged$y < 5000]<-"CRESOCA11"
+metadata_merged$Patient[metadata_merged$sample=="00075298" & metadata_merged$y > 5000 & metadata_merged$y < 15000]<-"NRESOCA61"
+metadata_merged$Patient[metadata_merged$sample=="00075298" & metadata_merged$y > 15000]<-"NRESOCA67"
+metadata_merged$Patient[metadata_merged$sample=="7599_part2" & metadata_merged$y < 5000]<-"CRESOCA92"
+metadata_merged$Patient[metadata_merged$sample=="7599_part2" & metadata_merged$y > 5000 & metadata_merged$y < 15000]<-"NRESOCA93"
+metadata_merged$Patient[metadata_merged$sample=="7599_part2" & metadata_merged$y > 15000]<-"NRESOCA96"
 # Restore the original cell IDs as row names.
 
 rownames(metadata_merged) <- metadata_merged$cell
