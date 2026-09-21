@@ -226,7 +226,13 @@ gsea_res <- GSEA(
 gsea_df<-gsea_res@result
 gsea_df$sig<-ifelse(gsea_df$qvalue<0.05,"*","")
 
+gsea_df <- gsea_res@result %>%
+  dplyr::arrange(NES)
 
+gsea_df$ID <- factor(
+  gsea_df$ID,
+  levels = gsea_df$ID
+)
 
 
 ggplot(
