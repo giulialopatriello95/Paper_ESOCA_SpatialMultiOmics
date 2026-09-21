@@ -1,4 +1,4 @@
-merged_df <- read_excel(
+gene_sample_matrix <- read_excel(
   "GeoMX_Raw_matrix.xlsx",sheet=1
 )
 
@@ -7,7 +7,7 @@ df <- read_excel(
 )
 
 
-gene_sample_matrix<-gene_sample_matrix[,df$FastqID]
+gene_sample_matrix<-gene_sample_matrix[,df$library_name]
 
 
 df$merge <- ""
@@ -17,7 +17,7 @@ df$merge[df$markers %in% c("CD45", "CD68")] <- paste("STROMA", df$title[df$marke
 df$merge[df$markers == "PanCK"] <- paste("TUMOR", df$title[df$markers == "PanCK"], sep = "_")
 
 group_vector<-df$merge
-counts_t <- as.data.frame(t(merged_df))
+counts_t <- as.data.frame(t(gene_sample_matrix))
 counts_t$Group <- group_vector
 
 # Aggregate by group
@@ -34,14 +34,10 @@ colnames(merged_counts)<-unique(df$merge)
 gene_sample_matrix<-merged_counts
 
 
-df<-df[,-c(1:3)]
+cols_to_remove <- c("library_name", "title","markers")
+
+df <- df %>%
+  select(-all_of(cols_to_remove))
+df$Segment_Name<-""
 df$Segment_Name[grepl("STROMA",df$merge)]<-"STROMA"
 df$Segment_Name[grepl("TUMORE",df$merge)]<-"TUMORE"
-df<-df %>%
-  group_by(ID_Sample_Slide_ID,N_samples_istologico,Condition,Segment_Name,
-           Batch,ROI,merge) %>%
-  summarise(sumArea=sum(as.numeric(Area)),sumNuclei=sum(as.numeric(Nuclei)))
-
-
-df$Area<-df$sumArea
-df$Nuclei<-df$sumNuclei
