@@ -1,13 +1,28 @@
 library(Seurat)
 library(dplyr)
 library(stringr)
-#load("newcellseg_high.Rdata")
-#load("Mesmer_manualannot.RData")
 
 
+nano.obj2 <-readRDS("Final_Slide2.rds")
+nano.obj3 <- readRDS("Final_Slide3.rds")
+nano.obj4 <- readRDS("Final_Slide1.rds")
 
-nano.obj.merge<-readRDS("prova.rds")
-#SpatialDimPlot(nano.obj.merge)
+nano.obj2 <- UpdateSeuratObject(nano.obj2)
+nano.obj3 <- UpdateSeuratObject(nano.obj3)
+nano.obj4 <- UpdateSeuratObject(nano.obj4)
+
+##############################3 MERGE
+nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj4), add.cell.ids = c("Slide2", "Slide3", "Slide4"))
+
+
+##############################4 CLUSTERING
+# standard preprocessing
+nano.obj.merge <- SCTransform(nano.obj.merge, assay = "Nanostring") %>%
+  RunPCA(npcs = 30, features = rownames(nano.obj.merge)) %>%
+  RunUMAP(dims = 1:30) %>%
+  FindNeighbors(reduction = "pca", dims = 1:30) %>%
+  FindClusters(resolution = 2)
+DefaultAssay(nano.obj.merge)<-"Nanostring"
 
 
 
@@ -120,7 +135,7 @@ BuildNicheAssay.using_all_fovs <- function(
 
 nano.obj.merge$customclassif<-Idents(nano.obj.merge)
 
-nano.obj.merge <- BuildNicheAssay.using_all_fovs(object = nano.obj.merge, group.by = "customclassif",
-                                           niches.k = 14, neighbors.k = 30)
+nano.obj.merge <- BuildNicheAssay.using_all_fovs(object = nano.obj.merge, group.by = "manualannot",
+                                                 niches.k = 14, neighbors.k = 30)
 
 DimPlot(nano.obj.merge,group.by="niches",label=T)
