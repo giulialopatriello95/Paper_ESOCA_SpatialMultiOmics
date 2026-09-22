@@ -27,12 +27,12 @@ library(dplyr)
 library(reshape)
 
 patient_ids <- c(
-  "52010783",
-  "51800155",
-  "21-I-11612B",
-  "21-I-11925A",
-  "51929838",
-  "20-I-14014"
+  "ESOCA8",
+  "ESOCA43",
+  "ESOCA35",
+  "ESOCA54",
+  "ESOCA55",
+  "ESOCA45"
 )
 
 # Function for one patient
@@ -164,8 +164,8 @@ results <- lapply(
 m_all <- do.call(rbind, results)
 
 
-df$condition[df$patient %in% c('52010783','21_I_11612B','20_I_14014')]<-'CR'
-df$condition[df$patient %in% c('21_I_11925A','51929838','51800155')]<-'NR'
+df$condition[df$patient %in% c('ESOCA43','ESOCA54','ESOCA45')]<-'CR'
+df$condition[df$patient %in% c('ESOCA55','ESOCA35','ESOCA8')]<-'NR'
 
 
 
