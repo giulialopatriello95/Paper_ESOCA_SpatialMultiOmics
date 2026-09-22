@@ -1,1 +1,398 @@
+library(Seurat)
+library(CellChat)
+library(future)
+library(magrittr)
+library(stringr)
+
+plan("multisession", workers = 4)
+
+# Increase allowed memory per worker (here: 8 GB x 4 workers = 32 GB total usage)
+options(future.globals.maxSize = 8 * 1024^3)  # 8 GB per worker
+
+
+#######################################################
+subset_opt <- function(
+    object = NULL,
+    subset,
+    cells = NULL,
+    idents = NULL,
+    Update.slots = TRUE,
+    Update.object = TRUE,
+    ...)
+{
+  
+  if (Update.slots) {
+    message("Updating object slots..")
+    object %<>% UpdateSlots()
+  }
+  
+  message("Cloing object..")
+  obj_subset <- object
+  
+  # sanity check - use only cell ids (no indices)
+  if (all(is.integer(cells))) {
+    cells <- Cells(obj_subset)[cells]
+  }
+  
+  if (!missing(subset) || !is.null(idents)) {
+    message("Extracting cells matched to `subset` and/or `idents`")
+  }
+  
+  if (class(obj_subset) == "FOV") {
+    message("object class is `FOV` ")
+    cells <- Cells(obj_subset)
+  } else if (!class(obj_subset) == "FOV" && !missing(subset)) {
+    subset <- enquo(arg = subset)
+    # cells to keep in the object
+    cells <-
+      WhichCells(object = obj_subset,
+                 cells = cells,
+                 idents = idents,
+                 expression = subset,
+                 return.null = TRUE, ...)
+  } else if (!class(obj_subset) == "FOV" && !is.null(idents)) {
+    cells <-
+      WhichCells(object = obj_subset,
+                 cells = cells,
+                 idents = idents,
+                 return.null = TRUE, ...)
+  } else if (is.null(cells)) {
+    cells <- Cells(obj_subset)
+  }
+  
+  # added support for object class `FOV`
+  if (class(obj_subset) == "FOV") {
+    message("Matching cells for object class `FOV`..")
+    cells_check <- any(obj_subset %>% Cells %in% cells)
+  } else {
+    # check if cells are present in all FOV
+    message("Matching cells in FOVs..")
+    cells_check <-
+      lapply(Images(obj_subset) %>% seq,
+             function(i) {
+               any(obj_subset[[Images(obj_subset)[i]]][["centroids"]] %>% Cells %in% cells)
+             }) %>% unlist
+  }
+  
+  if (all(cells_check)) {
+    message("Cell subsets are found in all FOVs!", "\n",
+            "Subsetting object..")
+    obj_subset %<>% base::subset(cells = cells, idents = idents, ...)
+  } else {
+    # if cells are present only in one or several FOVs:
+    # subset FOVs
+    fovs <-
+      lapply(Images(obj_subset) %>% seq, function(i) {
+        if (any(obj_subset[[Images(obj_subset)[i]]][["centroids"]] %>% Cells %in% cells)) {
+          message("Cell subsets are found only in FOV: ", "\n", Images(obj_subset)[i])
+          message("Subsetting Centroids..")
+          base::subset(x = obj_subset[[Images(obj_subset)[i]]], cells = cells, idents = idents, ...)
+        }
+      })
+    # replace subsetted FOVs, and remove FOVs with no matching cells
+    message("Removing FOVs where cells are NOT found: ", "\n",
+            paste0(Images(object)[which(!cells_check == TRUE)], "\n"), "\n",
+            "Subsetting cells..")
+    for (i in fovs %>% seq) { obj_subset[[Images(object)[i]]] <- fovs[[i]] }
+    
+  }
+  
+  # subset final object
+  obj_subset %<>% base::subset(cells = cells, ...)
+  
+  if (Update.object && !class(obj_subset) == "FOV") {
+    message("Updating object..")
+    obj_subset %<>% UpdateSeuratObject() }
+  
+  message("Object is ready!")
+  return(obj_subset)
+  
+}
+#################################################################
+
+
+nano.obj2 <-readRDS("Final_Slide2.rds")
+nano.obj3 <- readRDS("Final_Slide3.rds")
+nano.obj1 <- readRDS("Final_Slide1.rds")
+
+nano.obj2 <- UpdateSeuratObject(nano.obj2)
+nano.obj3 <- UpdateSeuratObject(nano.obj3)
+nano.obj1 <- UpdateSeuratObject(nano.obj4)
+
+##############################3 MERGE
+nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj1), add.cell.ids = c("Slide2", "Slide3", "Slide1"))
+
+
+
+# --- Metadata preparation ---
+nano.obj.merge$micro <- "epithelia"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("12","13","9","6","10","4","1","14","8","11")] <- "otherniches"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("5")] <- "niche5"
+nano.obj.merge <- subset(nano.obj.merge, micro != "epithelia")
+#nano.obj.merge$manualannot <- paste(nano.obj.merge$micro, nano.obj.merge$manualannot, sep = "_")
+DefaultAssay(nano.obj.merge) <- "SCT"
+
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("12","13","9","6","10","4","1")]<-"nichetumor"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("5","14","8","11")]<-"nichestromal"
+
+
+
+nano.obj.merge$manualannot <- paste(nano.obj.merge$micro, nano.obj.merge$manualannot, sep = "_")
+
+
+# Select one patient (example)
+seurat_object <- subset_opt(nano.obj.merge, patient == "52010783")
+
+# --- Create CellChat object (non-spatial mode) ---
+cellchat <- createCellChat(
+  object = seurat_object,
+  meta = seurat_object@meta.data,
+  group.by = "manualannot",
+  datatype = "RNA"   # 🔹 non-spatial mode
+)
+
+cellchat@meta$manualannot<-as.factor(cellchat@meta$manualannot)
+cellchat@meta$manualannot = droplevels(cellchat@meta$manualannot, exclude = setdiff(levels(cellchat@meta$manualannot),unique(cellchat@meta$manualannot)))
+# --- Update and set database ---
+cellchat <- setIdent(cellchat, ident.use = "manualannot")
+cellchat <- updateCellChat(cellchat)
+CellChatDB <- CellChatDB.human
+cellchat@DB <- CellChatDB
+cellchat <- subsetData(cellchat)
+
+# --- Parallelization ---
+future::plan("multisession", workers = 4)
+
+# --- Relaxed thresholds for expression detection ---
+cellchat <- identifyOverExpressedGenes(cellchat, thresh.pc = 0.05, thresh.fc = 0.05)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+# --- Compute probabilities (non-spatial) ---
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.05)
+cellchat <- filterCommunication(cellchat, min.cells = 10)  # allow smaller populations
+
+# --- Compute pathway probabilities ---
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+# --- Save output ---
+cellchat_52010783 <- cellchat
+
+
+
+seurat_object <- subset_opt(nano.obj.merge, patient == "21-I-11612B")
+
+# --- Create CellChat object (non-spatial mode) ---
+cellchat <- createCellChat(
+  object = seurat_object,
+  meta = seurat_object@meta.data,
+  group.by = "manualannot",
+  datatype = "RNA"   # 🔹 non-spatial mode
+)
+cellchat@meta$manualannot<-as.factor(cellchat@meta$manualannot)
+cellchat@meta$manualannot = droplevels(cellchat@meta$manualannot, exclude = setdiff(levels(cellchat@meta$manualannot),unique(cellchat@meta$manualannot)))
+# --- Update and set database ---
+cellchat <- setIdent(cellchat, ident.use = "manualannot")
+cellchat <- updateCellChat(cellchat)
+CellChatDB <- CellChatDB.human
+cellchat@DB <- CellChatDB
+cellchat <- subsetData(cellchat)
+
+# --- Parallelization ---
+future::plan("multisession", workers = 4)
+
+# --- Relaxed thresholds for expression detection ---
+cellchat <- identifyOverExpressedGenes(cellchat, thresh.pc = 0.05, thresh.fc = 0.05)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+# --- Compute probabilities (non-spatial) ---
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.05)
+cellchat <- filterCommunication(cellchat, min.cells = 10)  # allow smaller populations
+
+# --- Compute pathway probabilities ---
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+# --- Save output ---
+cellchat_21_I_11612B <- cellchat
+
+
+
+# Select one patient (example)
+seurat_object <- subset_opt(nano.obj.merge, patient == "20-I-14014")
+
+# --- Create CellChat object (non-spatial mode) ---
+cellchat <- createCellChat(
+  object = seurat_object,
+  meta = seurat_object@meta.data,
+  group.by = "manualannot",
+  datatype = "RNA"   # 🔹 non-spatial mode
+)
+cellchat@meta$manualannot<-as.factor(cellchat@meta$manualannot)
+cellchat@meta$manualannot = droplevels(cellchat@meta$manualannot, exclude = setdiff(levels(cellchat@meta$manualannot),unique(cellchat@meta$manualannot)))
+# --- Update and set database ---
+cellchat <- setIdent(cellchat, ident.use = "manualannot")
+cellchat <- updateCellChat(cellchat)
+CellChatDB <- CellChatDB.human
+cellchat@DB <- CellChatDB
+cellchat <- subsetData(cellchat)
+
+# --- Parallelization ---
+future::plan("multisession", workers = 4)
+
+# --- Relaxed thresholds for expression detection ---
+cellchat <- identifyOverExpressedGenes(cellchat, thresh.pc = 0.05, thresh.fc = 0.05)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+# --- Compute probabilities (non-spatial) ---
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.05)
+cellchat <- filterCommunication(cellchat, min.cells = 10)  # allow smaller populations
+
+# --- Compute pathway probabilities ---
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+# --- Save output ---
+cellchat_20_I_14014 <- cellchat
+
+
+
+
+
+
+# Select one patient (example)
+seurat_object <- subset_opt(nano.obj.merge, patient == "21-I-11925A")
+
+# --- Create CellChat object (non-spatial mode) ---
+cellchat <- createCellChat(
+  object = seurat_object,
+  meta = seurat_object@meta.data,
+  group.by = "manualannot",
+  datatype = "RNA"   # 🔹 non-spatial mode
+)
+cellchat@meta$manualannot<-as.factor(cellchat@meta$manualannot)
+cellchat@meta$manualannot = droplevels(cellchat@meta$manualannot, exclude = setdiff(levels(cellchat@meta$manualannot),unique(cellchat@meta$manualannot)))
+# --- Update and set database ---
+cellchat <- setIdent(cellchat, ident.use = "manualannot")
+cellchat <- updateCellChat(cellchat)
+CellChatDB <- CellChatDB.human
+cellchat@DB <- CellChatDB
+cellchat <- subsetData(cellchat)
+
+# --- Parallelization ---
+future::plan("multisession", workers = 4)
+
+# --- Relaxed thresholds for expression detection ---
+cellchat <- identifyOverExpressedGenes(cellchat, thresh.pc = 0.05, thresh.fc = 0.05)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+# --- Compute probabilities (non-spatial) ---
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.05)
+cellchat <- filterCommunication(cellchat, min.cells = 10)  # allow smaller populations
+
+# --- Compute pathway probabilities ---
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+# --- Save output ---
+cellchat_21_I_11925A <- cellchat
+
+
+
+# Select one patient (example)
+seurat_object <- subset_opt(nano.obj.merge, patient == "51800155")
+
+# --- Create CellChat object (non-spatial mode) ---
+cellchat <- createCellChat(
+  object = seurat_object,
+  meta = seurat_object@meta.data,
+  group.by = "manualannot",
+  datatype = "RNA"   # 🔹 non-spatial mode
+)
+cellchat@meta$manualannot<-as.factor(cellchat@meta$manualannot)
+cellchat@meta$manualannot = droplevels(cellchat@meta$manualannot, exclude = setdiff(levels(cellchat@meta$manualannot),unique(cellchat@meta$manualannot)))
+# --- Update and set database ---
+cellchat <- setIdent(cellchat, ident.use = "manualannot")
+cellchat <- updateCellChat(cellchat)
+CellChatDB <- CellChatDB.human
+cellchat@DB <- CellChatDB
+cellchat <- subsetData(cellchat)
+
+# --- Parallelization ---
+future::plan("multisession", workers = 4)
+
+# --- Relaxed thresholds for expression detection ---
+cellchat <- identifyOverExpressedGenes(cellchat, thresh.pc = 0.05, thresh.fc = 0.05)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+# --- Compute probabilities (non-spatial) ---
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.05)
+cellchat <- filterCommunication(cellchat, min.cells = 10)  # allow smaller populations
+
+# --- Compute pathway probabilities ---
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+# --- Save output ---
+cellchat_51800155 <- cellchat
+
+
+
+
+# Select one patient (example)
+seurat_object <- subset_opt(nano.obj.merge, patient == "51929838")
+
+# --- Create CellChat object (non-spatial mode) ---
+cellchat <- createCellChat(
+  object = seurat_object,
+  meta = seurat_object@meta.data,
+  group.by = "manualannot",
+  datatype = "RNA"   # 🔹 non-spatial mode
+)
+cellchat@meta$manualannot<-as.factor(cellchat@meta$manualannot)
+cellchat@meta$manualannot = droplevels(cellchat@meta$manualannot, exclude = setdiff(levels(cellchat@meta$manualannot),unique(cellchat@meta$manualannot)))
+# --- Update and set database ---
+cellchat <- setIdent(cellchat, ident.use = "manualannot")
+cellchat <- updateCellChat(cellchat)
+CellChatDB <- CellChatDB.human
+cellchat@DB <- CellChatDB
+cellchat <- subsetData(cellchat)
+
+# --- Parallelization ---
+future::plan("multisession", workers = 4)
+
+# --- Relaxed thresholds for expression detection ---
+cellchat <- identifyOverExpressedGenes(cellchat, thresh.pc = 0.05, thresh.fc = 0.05)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+# --- Compute probabilities (non-spatial) ---
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.05)
+cellchat <- filterCommunication(cellchat, min.cells = 10)  # allow smaller populations
+
+# --- Compute pathway probabilities ---
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+# --- Save output ---
+cellchat_51929838<- cellchat
+
+
+
+df_cellchat_20_I_14014 <- subsetCommunication(cellchat_20_I_14014,thresh=1) 
+df_cellchat_21_I_11612B<- subsetCommunication(cellchat_21_I_11612B,thresh=1) 
+df_cellchat_21_I_11925A<- subsetCommunication(cellchat_21_I_11925A,thresh=1) 
+df_cellchat_51800155<- subsetCommunication(cellchat_51800155,thresh=1) 
+df_cellchat_51929838<- subsetCommunication(cellchat_51929838,thresh=1) 
+df_cellchat_52010783<- subsetCommunication(cellchat_52010783,thresh=1) 
+
+
+df_cellchat_20_I_14014$patient<-"CR1"
+df_cellchat_21_I_11612B$patient<-"CR2"          
+df_cellchat_21_I_11925A$patient<-"NR1"                
+df_cellchat_51800155$patient<-"NR2"                  
+df_cellchat_51929838$patient<-"NR3"                   
+df_cellchat_52010783$patient<-"CR3"  
+
+
+df<-rbind(df_cellchat_20_I_14014,df_cellchat_21_I_11612B,df_cellchat_21_I_11925A,df_cellchat_51800155,df_cellchat_51929838,df_cellchat_52010783)
 
