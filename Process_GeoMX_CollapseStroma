@@ -1,43 +1,77 @@
-gene_sample_matrix <- read_excel(
-  "GeoMX_Raw_matrix.xlsx",sheet=1
-)
 
-df <- read_excel(
-  "GeoMX_metadata.xlsx",sheet=1
-)
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(edgeR)
+library(DESeq2)
+`%nin%` <- Negate(`%in%`)
 
+## ---- 1. Read the raw count matrix (genes x AOIs) --------------------------
+raw <- read_excel("GeoMX_Raw_matrix.xlsx", sheet = "Sheet1")
+raw <- as.data.frame(raw)
+rownames(raw) <- raw$Gene
+raw$Gene <- NULL
 
-gene_sample_matrix<-gene_sample_matrix[,df$library_name]
+gene_sample_matrix <- raw
+rm(raw)
 
+## ---- 2. Read the AOI-level metadata ---------------------------------------
+df <- read_excel("GeoMX_metadata.xlsx", sheet = "Foglio1")
+df <- as.data.frame(df)
 
-df$merge <- ""
+# Align metadata and count matrix on library_name, and put the matrix
+# columns in the same order as the metadata rows (equivalent to the old
+# gene_sample_matrix <- gene_sample_matrix[, df$FastqID])
+stopifnot(all(df$library_name %in% colnames(gene_sample_matrix)))
+gene_sample_matrix <- gene_sample_matrix[, df$library_name]
 
-df$merge[df$markers %in% c("CD45", "CD68")] <- paste("STROMA", df$title[df$markers %in% c("CD45", "CD68")], sep = "_")
+## ---- 3. Condition / Batch --------------------------------------------------
+# Already provided in the metadata, no hard-coded ID lists needed anymore.
+df$Condition <- df$response          # "NR" / "CR"
+# df$Batch already exists as df$batch ("FREGAT" / "OSR")
 
-df$merge[df$markers == "PanCK"] <- paste("TUMOR", df$title[df$markers == "PanCK"], sep = "_")
+## ---- 4. Segment_Name from the AOI marker ----------------------------------
+df$Segment_Name <- NA_character_
+df$Segment_Name[df$markers == "PanCK"] <- "TUMORE"
+df$Segment_Name[df$markers %in% c("CD45", "CD68")] <- "STROMA"
 
-group_vector<-df$merge
+# Defensive: drop any true negative-control AOIs, if present (none expected
+# in this dataset, unlike the original one which had Segment_Name == "NCT").
+df <- df[df$Segment_Name %nin% "NCT", ]
+gene_sample_matrix <- gene_sample_matrix[, df$library_name]
+
+## ---- 5. Build the merge key: one pseudobulk sample per ROI x compartment --
+# TUMORE = PanCK AOI for that ROI
+# STROMA = CD45 + CD68 AOIs for that ROI, summed together
+df$merge <- paste(df$Segment_Name, df$title)
+
+## ---- 6. Aggregate (sum) counts within each merge group --------------------
+group_vector <- df$merge
 counts_t <- as.data.frame(t(gene_sample_matrix))
 counts_t$Group <- group_vector
 
-# Aggregate by group
 merged_counts <- aggregate(. ~ Group, data = counts_t, FUN = sum)
-
-# Transpose back to original format
+group_order <- merged_counts$Group                # aggregate() sorts groups
 merged_counts <- as.data.frame(t(merged_counts[-1]))
-colnames(merged_counts) <- merged_counts[1,]
-merged_counts <- merged_counts[-1,]
-print(merged_counts)
+colnames(merged_counts) <- group_order
 
-dim(merged_counts)
-colnames(merged_counts)<-unique(df$merge)
-gene_sample_matrix<-merged_counts
+gene_sample_matrix <- merged_counts
+rm(merged_counts, counts_t, group_vector)
 
+dim(gene_sample_matrix)
 
-cols_to_remove <- c("library_name", "title","markers")
-
+## ---- 7. Collapse the AOI-level metadata to one row per merge group --------
 df <- df %>%
-  select(-all_of(cols_to_remove))
-df$Segment_Name<-""
-df$Segment_Name[grepl("STROMA",df$merge)]<-"STROMA"
-df$Segment_Name[grepl("TUMORE",df$merge)]<-"TUMORE"
+  group_by(merge, title, Segment_Name, Condition, batch, treatment) %>%
+  summarise(
+    n_AOIs_merged   = n(),
+    markers_merged  = paste(sort(unique(markers)), collapse = "+"),
+    .groups = "drop"
+  )
+
+# Keep metadata and count matrix in the same sample order
+df <- df[match(colnames(gene_sample_matrix), df$merge), ]
+stopifnot(all(colnames(gene_sample_matrix) == df$merge))
+
+## `gene_sample_matrix` (genes x pseudobulk samples) and `df` (one row per
+## pseudobulk sample) are now ready for downstream edgeR/DESeq2 analysis.
