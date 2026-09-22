@@ -15,6 +15,11 @@ nano.obj3 <- subset(nano.obj3, subset = nFeature_RNA > 20 & nFeature_RNA < 2500)
 nano.obj4 <- subset(nano.obj4, subset = nFeature_RNA > 20 & nFeature_RNA < 2500)
 
 ##############################3 MERGE
+nano.obj2 <- UpdateSeuratObject(nano.obj2)
+nano.obj3 <- UpdateSeuratObject(nano.obj3)
+nano.obj4 <- UpdateSeuratObject(nano.obj4)
+
+
 nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj4), add.cell.ids = c("Slide2", "Slide3", "Slide4"))
 
 
