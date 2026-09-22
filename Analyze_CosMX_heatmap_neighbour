@@ -148,6 +148,190 @@ calculate_patient <- function(patient_id, CosMX) {
       )
     )
   }
+
+
+
+
+CosMX <- nano.obj.merge
+
+results <- lapply(
+  patient_ids,
+  calculate_patient,
+  CosMX = CosMX
+)
+
+# Combine all patients
+m_all <- do.call(rbind, results)
+
+
+df$condition[df$patient %in% c('52010783','21_I_11612B','20_I_14014')]<-'CR'
+df$condition[df$patient %in% c('21_I_11925A','51929838','51800155')]<-'NR'
+
+
+
+df_mean <- df %>%
+  group_by(a, b, condition) %>%
+  summarise(
+    mean_c = mean(c, na.rm = TRUE),
+    .groups = "drop"
+  )
+df_mean <- df_mean %>%
+  group_by(condition) %>%
+  mutate(
+    zscore = (mean_c - mean(mean_c)) / sd(mean_c)
+  ) %>%
+  ungroup()
+ggplot(df_mean, aes(x = a, y = b, fill = zscore)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "dodgerblue",
+    mid = "white",
+    high = "red3",
+    midpoint = 0,
+    name = "Z-score"
+  ) +
+  facet_wrap(~ condition) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank()
+  )
+
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+
+
+
+  
+  mat <- df_mean %>%
+    filter(condition == "CR") %>%
+    select(a, b, zscore) %>%
+    pivot_wider(
+      names_from = a,
+      values_from = zscore,
+      values_fill = 0
+    ) %>%
+    column_to_rownames("b")
+  col_order <- c("T","B lympho","DC","Gran","Fibro","Tumor",
+                 "Endo","Macro \u03C6","SMC","Mast","NK","Peri")
+  mat <- as.matrix(mat)
+  # add missing rows
+  missing_rows <- setdiff(col_order, rownames(mat))
+  if (length(missing_rows) > 0) {
+    mat <- rbind(
+      mat,
+      matrix(0,
+             nrow = length(missing_rows),
+             ncol = ncol(mat),
+             dimnames = list(missing_rows, colnames(mat)))
+    )
+  }
+  
+  # add missing columns
+  missing_cols <- setdiff(col_order, colnames(mat))
+  if (length(missing_cols) > 0) {
+    mat <- cbind(
+      mat,
+      matrix(0,
+             nrow = nrow(mat),
+             ncol = length(missing_cols),
+             dimnames = list(rownames(mat), missing_cols))
+    )
+  }
+  
+  # final enforced order
+  mat <- mat[col_order, col_order, drop = FALSE]
+  
+  mat[is.na(mat)] <- 0
+
+  
+  max_val <- max(abs(mat))
+
+p1<-  pheatmap(
+    mat,
+    color = colorRampPalette(c("dodgerblue", "white", "red3"))(100),
+    breaks = seq(-max_val, max_val, length.out = 101),
+    cluster_rows = F,
+    cluster_cols = F,
+    border_color = NA,
+    main = paste("Complete Responders"),fontfamily = "Arial"
+  )
+
+
+
+
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+
+
+
+
+mat <- df_mean %>%
+  filter(condition == "NR") %>%
+  select(a, b, zscore) %>%
+  pivot_wider(
+    names_from = a,
+    values_from = zscore,
+    values_fill = 0
+  ) %>%
+  column_to_rownames("b")
+col_order <- c("T","B lympho","DC","Gran","Fibro","Tumor",
+               "Endo","Macro \u03C6","SMC","Mast","NK","Peri")
+mat <- as.matrix(mat)
+# add missing rows
+missing_rows <- setdiff(col_order, rownames(mat))
+if (length(missing_rows) > 0) {
+  mat <- rbind(
+    mat,
+    matrix(0,
+           nrow = length(missing_rows),
+           ncol = ncol(mat),
+           dimnames = list(missing_rows, colnames(mat)))
+  )
+}
+
+# add missing columns
+missing_cols <- setdiff(col_order, colnames(mat))
+if (length(missing_cols) > 0) {
+  mat <- cbind(
+    mat,
+    matrix(0,
+           nrow = nrow(mat),
+           ncol = length(missing_cols),
+           dimnames = list(rownames(mat), missing_cols))
+  )
+}
+
+# final enforced order
+mat <- mat[col_order, col_order, drop = FALSE]
+
+mat[is.na(mat)] <- 0
+
+
+max_val <- max(abs(mat))
+
+p2<-  pheatmap(
+  mat,
+  color = colorRampPalette(c("dodgerblue", "white", "red3"))(100),
+  breaks = seq(-max_val, max_val, length.out = 101),
+  cluster_rows = F,
+  cluster_cols = F,
+  border_color = NA,
+  main = paste("Non Responders"),fontfamily = "Arial"
+)
+library(gridExtra)
+
+grid.arrange(
+  p1$gtable,
+  p2$gtable,
+  ncol = 2
+)
+
+
+
+
   
   return(m_all)
 }
