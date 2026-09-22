@@ -125,15 +125,14 @@ nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj1), add.cell.ids = c
 
 
 # --- Metadata preparation ---
-nano.obj.merge$micro <- "epithelia"
-nano.obj.merge$micro[nano.obj.merge$niches %in% c("12","13","9","6","10","4","1","14","8","11")] <- "otherniches"
-nano.obj.merge$micro[nano.obj.merge$niches %in% c("5")] <- "niche5"
+nano.obj.merge$micro <- "otherniches"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("2","3","7")] <- "eipthelia"
 nano.obj.merge <- subset(nano.obj.merge, micro != "epithelia")
 #nano.obj.merge$manualannot <- paste(nano.obj.merge$micro, nano.obj.merge$manualannot, sep = "_")
 DefaultAssay(nano.obj.merge) <- "SCT"
 
-nano.obj.merge$micro[nano.obj.merge$niches %in% c("12","13","9","6","10","4","1")]<-"nichetumor"
-nano.obj.merge$micro[nano.obj.merge$niches %in% c("5","14","8","11")]<-"nichestromal"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("11","12","9","6","10","4","1")]<-"nichetumor"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("5","13","8","10")]<-"nichestromal"
 
 
 
