@@ -1,0 +1,149 @@
+library(Seurat)
+library(stringr)
+library(ggplot2)
+library(DESeq2)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ks)
+library(InSituCor)
+
+
+nano.obj2 <-readRDS("Final_Slide2.rds")
+nano.obj3 <- readRDS("Final_Slide3.rds")
+nano.obj1 <- readRDS("Final_Slide1.rds")
+
+nano.obj2 <- UpdateSeuratObject(nano.obj2)
+nano.obj3 <- UpdateSeuratObject(nano.obj3)
+nano.obj1 <- UpdateSeuratObject(nano.obj1)
+
+##############################3 MERGE
+nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj4), add.cell.ids = c("Slide2", "Slide3", "Slide1"))
+
+library(dplyr)
+library(reshape)
+
+patient_ids <- c(
+  "52010783",
+  "51800155",
+  "21-I-11612B",
+  "21-I-11925A",
+  "51929838",
+  "20-I-14014"
+)
+
+# Function for one patient
+calculate_patient <- function(patient_id, CosMX) {
+  
+  message("Processing patient: ", patient_id)
+  
+  # Subset patient
+  seurat_object <- subset_opt(
+    CosMX,
+    patient == patient_id
+  )
+  
+  annot <- as.data.frame(seurat_object@meta.data)
+  
+  # Counts
+  norm <- t(as.matrix(
+    seurat_object@assays$Nanostring$counts
+  ))
+  
+  # Coordinates
+  xy <- GetTissueCoordinates(seurat_object)
+  xy$x <- xy$x - min(xy$x)
+  xy$y <- xy$y - min(xy$y)
+  
+  rownames(xy) <- xy$cell
+  xy <- xy[, -3]
+  
+  # Spatial correlation
+  step1 <- calcSpatialCor(
+    counts = norm,
+    conditionon = annot[, c("nCount_Nanostring", "manualannot")],
+    neighbors = NULL,
+    xy = xy,
+    k = 50,
+    radius = NULL,
+    tissue = NULL,
+    roundcortozero = 0.1,
+    max_cells = 10000,
+    verbose = FALSE
+  )
+  
+  # Cell types
+  celltype_names <- unique(
+    as.character(seurat_object$manualannot)
+  )
+  
+  # All cell-type pairs
+  feat_pairs <- expand.grid(
+    A = celltype_names,
+    B = celltype_names,
+    stringsAsFactors = FALSE
+  )
+  
+  # Remove unwanted cell types
+  feat_pairs <- feat_pairs[
+    !feat_pairs$A %in% c("basal_squamous", "mature_squamous") &
+    !feat_pairs$B %in% c("basal_squamous", "mature_squamous"),
+  ]
+  
+  # Calculate mean spatial correlation
+  m_all <- data.frame(
+    a = character(),
+    b = character(),
+    c = numeric(),
+    patient = character()
+  )
+  
+  for (i in seq_len(nrow(feat_pairs))) {
+    
+    a <- feat_pairs$A[i]
+    b <- feat_pairs$B[i]
+    
+    row_names <- rownames(
+      annot[annot$manualannot == a, ]
+    )
+    
+    col_names <- rownames(
+      annot[annot$manualannot == b, ]
+    )
+    
+    if (length(row_names) > 0 && length(col_names) > 0) {
+      
+      mat <- as.vector(
+        as.matrix(
+          step1$neighbors[
+            row_names,
+            col_names,
+            drop = FALSE
+          ]
+        )
+      )
+      
+      mat <- mat[mat > 0]
+      
+      if (length(mat) > 0) {
+        m <- mean(mat)
+      } else {
+        m <- 0
+      }
+      
+    } else {
+      m <- 0
+    }
+    
+    m_all <- rbind(
+      m_all,
+      data.frame(
+        a = a,
+        b = b,
+        c = m,
+        patient = patient_id
+      )
+    )
+  }
+  
+  return(m_all)
+}
