@@ -19,6 +19,10 @@ nano.obj1 <- UpdateSeuratObject(nano.obj1)
 ##############################3 MERGE
 nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj4), add.cell.ids = c("Slide2", "Slide3", "Slide1"))
 
+nano.obj.merge$micro <- "otherniches"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("2","3","7")] <- "eipthelia"
+nano.obj.merge <- subset(nano.obj.merge, micro != "epithelia")
+
 library(dplyr)
 library(reshape)
 
