@@ -19,75 +19,55 @@ library(DESeq2)
 library(ggplot2)
 library(edgeR)
 library(SurfR)
-
+library(readxl)
 
 ############################
 # 2. OSR cohort
 ############################
 
 # Load gene-level expression matrix and sample metadata.
-merged_df <- read.table(
-  "aw_BulkRNAseq_ESOCA.xlsx",
-  header = TRUE
+merged_df <- read_excel(
+  "Raw_BulkRNAseq_ESOCA.xlsx",sheet=1
 )
+rownames(merged_df)<-merged_df$Gene
 
-sampledata <- read.table("sampledata.txt")
+mat<-as.matrix(merged_df[,-ncol(merged_df)])
+rownames(mat)<-merged_df$Gene
+
+sampledata <- read_excel("Bulk_metadata.xlsx")
+rownames(sampledata)<-sampledata$`*library name`
+sampledata$Response<-as.factor(sampledata$Response)
 
 
-# Define the sequencing library type.
-# Samples generated using Smart-seq are explicitly labelled.
-sampledata$Library <- "mRNA"
-
-sampledata$Library[
-  sampledata$Sample %in% c(
-    "RNAESOCA70T",
-    "RNAESOCA77T",
-    "RNAESOCA93T",
-    "RNAESOCA97T",
-    "RNAESOCA102T",
-    "RNAFT9_bis"
-  )
-] <- "smartSeq"
 
 
 # Retain only samples from the OSR cohort.
-sampledata <- sampledata[sampledata$Cohort != "Fregat", ]
-
-
+sampledata <- sampledata[sampledata$Cohort != "FREGAT", ]
+sampledata$Run<-as.factor(sampledata$Run)
+rownames(sampledata)<-sampledata$`*library name`
 # Match the expression matrix to the samples present
 # in the metadata.
-merged_df <- merged_df[, rownames(sampledata)]
-
-
-# Create the DESeq2 dataset.
-# Differential expression is modelled according to treatment response.
-dds <- DESeqDataSetFromMatrix(
-  countData = merged_df,
-  colData = sampledata,
-  design = ~ Response
-)
-
-# Run the DESeq2 differential expression workflow.
-dds <- DESeq(dds)
-
-# Extract the normalized expression matrix.
-mat <- assay(dds)
+mat <- mat[, rownames(sampledata)]
 
 
 # Determine the smallest number of biological replicates
 # among the response groups.
 Nreplica_value.OSR <- min(table(sampledata$Response))
 
-
 # Differential expression analysis using SurfR.
 #
 # CR = complete responder
 # NR = non-responder
 #
+storage.mode(mat) <- "integer"
+
+sampledata_df<-as.data.frame(sampledata)
+rownames(sampledata_df)<-sampledata_df$`*library name`
+
 # Run is included in the design to account for technical variation.
-df.OSR <- DGE(
-  expression = merged_df,
-  metadata = sampledata,
+df.OSR <- SurfR::DGE(
+  expression = mat,
+  metadata = sampledata_df,
   Nreplica = Nreplica_value.OSR,
   design = "~ Run + Response",
   condition = "Response",
@@ -102,65 +82,49 @@ df.OSR <- DGE(
 # 3. FREGAT cohort
 ############################################################
 
-# Load libraries required for the FREGAT analysis.
-library(DESeq2)
-library(ggplot2)
-
-
-# Load expression matrix and metadata.
-merged_df <- read.table(
-  "aw_BulkRNAseq_ESOCA.xlsx",
-  header = TRUE
+# Load gene-level expression matrix and sample metadata.
+merged_df <- read_excel(
+  "Raw_BulkRNAseq_ESOCA.xlsx",sheet=1
 )
+rownames(merged_df)<-merged_df$Gene
 
-sampledata <- read.table("sampledata.txt")
+mat<-as.matrix(merged_df[,-ncol(merged_df)])
+rownames(mat)<-merged_df$Gene
 
-
-# Define sequencing library type.
-sampledata$Library <- "mRNA"
-
-sampledata$Library[
-  sampledata$Sample %in% c(
-    "RNAESOCA70T",
-    "RNAESOCA77T",
-    "RNAESOCA93T",
-    "RNAESOCA97T",
-    "RNAESOCA102T",
-    "RNAFT9_bis"
-  )
-] <- "smartSeq"
+sampledata <- read_excel("Bulk_metadata.xlsx")
+rownames(sampledata)<-sampledata$`*library name`
+sampledata$Response<-as.factor(sampledata$Response)
 
 
-# Retain only samples belonging to the FREGAT cohort.
-sampledata <- sampledata[sampledata$Cohort == "Fregat", ]
 
 
-# Match expression data to the selected samples.
-merged_df <- merged_df[, rownames(sampledata)]
+# Retain only samples from the OSR cohort.
+sampledata <- sampledata[sampledata$Cohort == "FREGAT", ]
+sampledata$Run<-as.factor(sampledata$Run)
+rownames(sampledata)<-sampledata$`*library name`
+# Match the expression matrix to the samples present
+# in the metadata.
+mat <- mat[, rownames(sampledata)]
 
 
-# Create and run the DESeq2 analysis.
-dds <- DESeqDataSetFromMatrix(
-  countData = merged_df,
-  colData = sampledata,
-  design = ~ Response
-)
-
-dds <- DESeq(dds)
-
-# Extract normalized expression values.
-mat <- assay(dds)
-
-
-# Determine the minimum number of replicates
+# Determine the smallest number of biological replicates
 # among the response groups.
 Nreplica_value.FREGAT <- min(table(sampledata$Response))
 
-
 # Differential expression analysis using SurfR.
-df.FREGAT <- DGE(
-  expression = merged_df,
-  metadata = sampledata,
+#
+# CR = complete responder
+# NR = non-responder
+#
+storage.mode(mat) <- "integer"
+
+sampledata_df<-as.data.frame(sampledata)
+rownames(sampledata_df)<-sampledata_df$`*library name`
+
+# Run is included in the design to account for technical variation.
+df.FREGAT<- SurfR::DGE(
+  expression = mat,
+  metadata = sampledata_df,
   Nreplica = Nreplica_value.FREGAT,
   design = "~ Run + Response",
   condition = "Response",
@@ -522,41 +486,32 @@ library(edgeR)
 library(SurfR)
 
 
-# Load the bulk RNA-seq count matrix and metadata.
-merged_df <- read.table(
-  "aw_BulkRNAseq_ESOCA.xlsx",
-  header = TRUE
+merged_df <- read_excel(
+  "Raw_BulkRNAseq_ESOCA.xlsx",sheet=1
 )
+rownames(merged_df)<-merged_df$Gene
 
-sampledata <- read.table("sampledata.txt")
+mat<-as.matrix(merged_df[,-ncol(merged_df)])
+rownames(mat)<-merged_df$Gene
 
-
-# Define sequencing library type.
-sampledata$Library <- "mRNA"
-
-sampledata$Library[
-  sampledata$Sample %in% c(
-    "RNAESOCA70T",
-    "RNAESOCA77T",
-    "RNAESOCA93T",
-    "RNAESOCA97T",
-    "RNAESOCA102T",
-    "RNAFT9_bis"
-  )
-] <- "smartSeq"
-
-
+sampledata <- read_excel("Bulk_metadata.xlsx")
+rownames(sampledata)<-sampledata$`*library name`
+sampledata$Response<-as.factor(sampledata$Response)
+sampledata$Cohort<-as.factor(sampledata$Cohort)
+rownames(sampledata)<-sampledata$`*library name`
+mat<-as.matrix(merged_df)
 # Match expression data to metadata.
-merged_df <- merged_df[, rownames(sampledata)]
-
-
+mat <- mat[, rownames(sampledata)]
+storage.mode(mat) <- "integer"
+sampledata_df<-as.data.frame(sampledata)
+rownames(sampledata_df)<-sampledata_df$`*library name`
 # Build the DESeq2 object.
 # Batch is included in the design to account for
 # potential technical effects.
 dds <- DESeqDataSetFromMatrix(
-  countData = merged_df,
-  colData = sampledata,
-  design = ~ Batch + Response
+  countData = mat,
+  colData = sampledata_df,
+  design = ~ Cohort + Response
 )
 
 dds <- DESeq(dds)
@@ -596,16 +551,10 @@ DESeq2::plotPCA(
 # 11. PCA by cohort
 ############################################################
 
-# Standardize the cohort name before plotting.
-rld$Cohort <- gsub(
-  "OSR_old",
-  "OSR",
-  rld$Cohort
-)
 
 
 # Generate PCA coloured by cohort.
-p <- DESeq2::plotPCA(
+DESeq2::plotPCA(
   rld[rownames(genes), ],
   intgroup = c("Cohort")
 ) +
@@ -615,44 +564,3 @@ p <- DESeq2::plotPCA(
   theme(aspect.ratio = 1) +
   geom_point(size = 5)
 
-
-# Save the cohort PCA as a high-resolution JPEG.
-ggsave(
-  filename = "PCA_DESeq2_Cohort.jpg",
-  plot = p,
-  device = "jpg",
-  width = 6,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
-
-
-############################################################
-# 12. PCA by treatment response
-############################################################
-
-# Generate the response-based PCA.
-p <- DESeq2::plotPCA(
-  rld[rownames(genes_use), ],
-  intgroup = c("Response")
-) +
-  theme(aspect.ratio = 1) +
-  geom_point(size = 5)
-
-
-# Save the response PCA.
-ggsave(
-  filename = "PCA_DESeq2_Response.jpg",
-  plot = p,
-  device = "jpg",
-  width = 6,
-  height = 6,
-  units = "in",
-  dpi = 300
-)
-
-
-############################################################
-# End of analysis
-############################################################
