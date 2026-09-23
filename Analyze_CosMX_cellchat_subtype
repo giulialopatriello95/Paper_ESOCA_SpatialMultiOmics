@@ -1,0 +1,265 @@
+library(Seurat)
+library(CellChat)
+library(future)
+library(magrittr)
+library(stringr)
+
+plan("multisession", workers = 4)
+
+# Increase allowed memory per worker (here: 8 GB x 4 workers = 32 GB total usage)
+options(future.globals.maxSize = 8 * 1024^3)  # 8 GB per worker
+
+
+#######################################################
+subset_opt <- function(
+    object = NULL,
+    subset,
+    cells = NULL,
+    idents = NULL,
+    Update.slots = TRUE,
+    Update.object = TRUE,
+    ...)
+{
+  
+  if (Update.slots) {
+    message("Updating object slots..")
+    object %<>% UpdateSlots()
+  }
+  
+  message("Cloing object..")
+  obj_subset <- object
+  
+  # sanity check - use only cell ids (no indices)
+  if (all(is.integer(cells))) {
+    cells <- Cells(obj_subset)[cells]
+  }
+  
+  if (!missing(subset) || !is.null(idents)) {
+    message("Extracting cells matched to `subset` and/or `idents`")
+  }
+  
+  if (class(obj_subset) == "FOV") {
+    message("object class is `FOV` ")
+    cells <- Cells(obj_subset)
+  } else if (!class(obj_subset) == "FOV" && !missing(subset)) {
+    subset <- enquo(arg = subset)
+    # cells to keep in the object
+    cells <-
+      WhichCells(object = obj_subset,
+                 cells = cells,
+                 idents = idents,
+                 expression = subset,
+                 return.null = TRUE, ...)
+  } else if (!class(obj_subset) == "FOV" && !is.null(idents)) {
+    cells <-
+      WhichCells(object = obj_subset,
+                 cells = cells,
+                 idents = idents,
+                 return.null = TRUE, ...)
+  } else if (is.null(cells)) {
+    cells <- Cells(obj_subset)
+  }
+  
+  # added support for object class `FOV`
+  if (class(obj_subset) == "FOV") {
+    message("Matching cells for object class `FOV`..")
+    cells_check <- any(obj_subset %>% Cells %in% cells)
+  } else {
+    # check if cells are present in all FOV
+    message("Matching cells in FOVs..")
+    cells_check <-
+      lapply(Images(obj_subset) %>% seq,
+             function(i) {
+               any(obj_subset[[Images(obj_subset)[i]]][["centroids"]] %>% Cells %in% cells)
+             }) %>% unlist
+  }
+  
+  if (all(cells_check)) {
+    message("Cell subsets are found in all FOVs!", "\n",
+            "Subsetting object..")
+    obj_subset %<>% base::subset(cells = cells, idents = idents, ...)
+  } else {
+    # if cells are present only in one or several FOVs:
+    # subset FOVs
+    fovs <-
+      lapply(Images(obj_subset) %>% seq, function(i) {
+        if (any(obj_subset[[Images(obj_subset)[i]]][["centroids"]] %>% Cells %in% cells)) {
+          message("Cell subsets are found only in FOV: ", "\n", Images(obj_subset)[i])
+          message("Subsetting Centroids..")
+          base::subset(x = obj_subset[[Images(obj_subset)[i]]], cells = cells, idents = idents, ...)
+        }
+      })
+    # replace subsetted FOVs, and remove FOVs with no matching cells
+    message("Removing FOVs where cells are NOT found: ", "\n",
+            paste0(Images(object)[which(!cells_check == TRUE)], "\n"), "\n",
+            "Subsetting cells..")
+    for (i in fovs %>% seq) { obj_subset[[Images(object)[i]]] <- fovs[[i]] }
+    
+  }
+  
+  # subset final object
+  obj_subset %<>% base::subset(cells = cells, ...)
+  
+  if (Update.object && !class(obj_subset) == "FOV") {
+    message("Updating object..")
+    obj_subset %<>% UpdateSeuratObject() }
+  
+  message("Object is ready!")
+  return(obj_subset)
+  
+}
+#################################################################
+
+
+
+nano.obj2 <-readRDS("Final_Slide2.rds")
+nano.obj3 <- readRDS("Final_Slide3.rds")
+nano.obj1 <- readRDS("Final_Slide1.rds")
+
+nano.obj2 <- UpdateSeuratObject(nano.obj2)
+nano.obj3 <- UpdateSeuratObject(nano.obj3)
+nano.obj1 <- UpdateSeuratObject(nano.obj4)
+
+##############################3 MERGE
+nano.obj.merge <- merge(nano.obj2, y = c(nano.obj3, nano.obj1), add.cell.ids = c("Slide2", "Slide3", "Slide1"))
+
+
+
+# --- Metadata preparation ---
+nano.obj.merge$micro <- "otherniches"
+nano.obj.merge$micro[nano.obj.merge$niches %in% c("2","3","7")] <- "eipthelia"
+nano.obj.merge <- subset(nano.obj.merge, micro != "epithelia")
+#nano.obj.merge$manualannot <- paste(nano.obj.merge$micro, nano.obj.merge$manualannot, sep = "_")
+DefaultAssay(nano.obj.merge) <- "SCT"
+
+seurat_object2<-subset(nano.obj.merge,manualannot==CELLTYPE)
+Idents(seurat_object2)<-seurat_object2$subtype
+
+nano.obj.merge$manualannot <- paste(nano.obj.merge$micro, nano.obj.merge$manualannot, sep = "_")
+for (cluster in unique(Idents(seurat_object2))){
+  selected_cells<-rownames(seurat_object2@meta.data[Idents(seurat_object2)==cluster,])
+  nano.obj.merge$manualannot[rownames(nano.obj.merge@meta.data) %in% selected_cells]<-paste("Cluster",cluster,sep="")
+  
+}
+
+
+
+# ---------------------------------------------------------
+# CellChat analysis for each patient
+# ---------------------------------------------------------
+
+# Patients to analyze
+patients <- c(
+  "52010783",
+  "21-I-11612B",
+  "20-I-14014",
+  "21-I-11925A",
+  "51800155",
+  "51929838"
+)
+
+# Parallelization
+future::plan("multisession", workers = 4)
+
+# CellChat database
+CellChatDB <- CellChatDB.human
+
+# Create list to store results
+cellchat_list <- list()
+
+# ---------------------------------------------------------
+# Loop over patients
+# ---------------------------------------------------------
+
+for (patient_id in patients) {
+  
+  message("======================================")
+  message("Processing patient: ", patient_id)
+  message("======================================")
+  
+  # Select patient
+  seurat_object <- subset_opt(
+    nano.obj.merge,
+    patient == patient_id
+  )
+  
+  # Check that patient has cells
+  if (ncol(seurat_object) == 0) {
+    warning("No cells found for patient: ", patient_id)
+    next
+  }
+  
+  # Create CellChat object
+  cellchat <- createCellChat(
+    object = seurat_object,
+    meta = seurat_object@meta.data,
+    group.by = "manualannot",
+    datatype = "RNA"
+  )
+  
+  # Make annotation factor and remove unused levels
+  cellchat@meta$manualannot <- as.factor(
+    cellchat@meta$manualannot
+  )
+  
+  cellchat@meta$manualannot <- droplevels(
+    cellchat@meta$manualannot
+  )
+  
+  # Update and set database
+  cellchat <- setIdent(
+    cellchat,
+    ident.use = "manualannot"
+  )
+  
+  cellchat <- updateCellChat(cellchat)
+  
+  cellchat@DB <- CellChatDB
+  
+  # Subset data based on CellChat database
+  cellchat <- subsetData(cellchat)
+  
+  # Identify overexpressed genes
+  cellchat <- identifyOverExpressedGenes(
+    cellchat,
+    thresh.pc = 0.05,
+    thresh.fc = 0.05
+  )
+  
+  # Identify overexpressed interactions
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  
+  # Compute communication probabilities
+  cellchat <- computeCommunProb(
+    cellchat,
+    type = "truncatedMean",
+    trim = 0.05
+  )
+  
+  # Filter interactions
+  cellchat <- filterCommunication(
+    cellchat,
+    min.cells = 10
+  )
+  
+  # Compute pathway probabilities
+  cellchat <- computeCommunProbPathway(cellchat)
+  
+  # Aggregate network
+  cellchat <- aggregateNet(cellchat)
+  
+  # Store result using patient ID as name
+  cellchat_list[[patient_id]] <- cellchat
+  
+  message("Finished patient: ", patient_id)
+}
+
+# ---------------------------------------------------------
+# Save results
+# ---------------------------------------------------------
+
+save(
+  cellchat_list,
+  file = "CELLTYPE_Subtype_cellchat_allniches.RData"
+)
+
