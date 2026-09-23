@@ -149,14 +149,9 @@ for (cluster in unique(Idents(seurat_object2))){
 # ---------------------------------------------------------
 
 # Patients to analyze
-patients <- c(
-  "52010783",
-  "21-I-11612B",
-  "20-I-14014",
-  "21-I-11925A",
-  "51800155",
-  "51929838"
-)
+patients <- unique(nano.obj.merge$patient)
+patients <- patients[!is.na(patients)]
+
 
 # Parallelization
 future::plan("multisession", workers = 4)
