@@ -1,582 +1,485 @@
-library(dplyr)
-library(tidyr)
-library(edgeR)
-library(DESeq2)
-library(GEOquery)
-# Example: GSE131907 (non-small cell lung cancer single-cell RNA-seq)
-#geo_id <- "GSE217845"
-#gse <- getGEO(geo_id, GSEMatrix = TRUE)
-
-
-`%nin%` = Negate(`%in%`)
-#library(preprocessCore)
-df<-read.delim("new_sample_table.txt",header = T)
-df$FastqID<-gsub("=.*","",df$FastqID)
-df$FastqID<-gsub(" ","",df$FastqID)
-df$Area<-as.numeric(gsub(",",".",df$Area))
-colnames(gene_sample_matrix)<-gsub(".dcc","",colnames(gene_sample_matrix))
-#intersect(df$FastqID,colnames(count_matrix))
-#chi ? CR e NR
-df$Condition<-"NR"
-df$N_samples_istologico[df$N_samples_istologico %in% c("C1826515","C1826516","C1826517",
-                                                       "C1826518","C1826519","C1826520","C1826521","C1826522",
-                                                       "C1826523","C1826524","C1826525","C1826526","C1826527",
-                                                       "C1826528","C1826529","C1826530","C1826531","C1826532",
-                                                       "C1826533","C1826534","C1826535")]<-"C1826514"
-
-df$Condition[df$N_samples_istologico  %in% c("C1624423","C1624291","C1632599",
-                                             "24-I-00321"," 21-I-11612","18-06411",
-                                             "20-10783")]<-"CR"
-df$Batch<-"OSR"
-df$Batch[df$N_samples_istologico %in% c("C1622274","C1624291","C1624423","C1628347","C1624909","C1631077","C1632599","C1826514","C1826515",
-                                        "C1826516","C1826517","C1826518","C1826519","C1826520","C1826521","C1826522",
-                                        "C1826523","C1826524","C1826525","C1826526","C1826527","C1826528","C1826529",
-                                        "C1826530","C1826531","C1826532","C1826533","C1826534","C1826535")]<-"FREGAT"
-
-df$Batch[df$N_samples_istologico %in% c("C1622274","C1624291","C1624423","C1628347","C1624909","C1631077","C1632599","C1826514","C1826515",
-                                        "C1826516","C1826517","C1826518","C1826519","C1826520","C1826521","C1826522",
-                                        "C1826523","C1826524","C1826525","C1826526","C1826527","C1826528","C1826529",
-                                        "C1826530","C1826531","C1826532","C1826533","C1826534","C1826535")]<-"FREGAT"
-
-df$FastqID<-gsub(" ","",df$FastqID)
-df<-df[df$FastqID  %nin% c("DSP-1001660035811-E-A06","DSP-1001660035811-E-A09",
-                           "DSP-1001660035811-E-B08",
-                           "DSP-1001660035811-E-F07","DSP-1001660035811-E-F08",
-                           "DSP-1001660035811-E-G07","DSP-1001660035811-E-G10",
-                           "DSP-1001660035812-F-B09","DSP-1001660035812-F-B10",
-                           "DSP-1001660035812-F-B11","DSP-1001660035812-F-C03",
-                           "DSP-1001660035812-F-C04","DSP-1001660035812-F-C05",
-                           #                           "DSP-1001660035812-F-C06",
-                           #                           "DSP-1001660035812-F-C07",
-                           "DSP-1001660035812-F-E09",
-                           "DSP-1001660035812-F-G09",
-                           "DSP-1001660012001-B-E12",
-                           "DSP-1001660016058-C-E09",
-                           "DSP-1001660016058-C-E10",
-                           #                           "DSP-1001660016057-D-B07",
-                           #                           "DSP-1001660016057-D-B08",
-                           #                           "DSP-1001660016057-D-B09",
-                           "DSP-1001660016057-D-C11",
-                           "DSP-1001660016057-D-D06",
-                           "DSP-1001660016057-D-D07",
-                           "DSP-1001660016057-D-E06",
-                           "DSP-1001660016057-D-E07",
-                           "DSP-1001660016057-D-E08",
-                           "DSP-1001660016057-D-E09",
-                           "DSP-1001660016057-D-E10",
-                           "DSP-1001660016057-D-E11",
-                           "DSP-1001660035811-E-F06","DSP-1001660035811-E-F12","DSP-1001660016057-D-D12","DSP-1001660016057-D-E01"),]                      
-
-
-df<-df[df$N_samples_istologico!="NCT",]
-df$Segment_Name[grepl("LINFOCITI",df$Segment_Name)]<-"LINFOCITI"
-df$Segment_Name[grepl("Epitelio",df$Segment_Name)]<-"Epitelio"
-df<-df[df$Segment_Name=="MACROFAGI",]
-#df<-df[df$Segment_Name %in% c("MACROFAGI","LINFOCITI"),]
-#df<-df[df$N_samples_istologico!="C1622274",]
-gene_sample_matrix<-gene_sample_matrix[,df$FastqID]
-
-
-
-data<-as.integer(gene_sample_matrix)
-
-# Convert to integer matrix
-integer_matrix <- apply(gene_sample_matrix, c(1, 2), as.integer)
-
-# Maintain row and column names
-rownames(integer_matrix) <- rownames(gene_sample_matrix)
-colnames(integer_matrix) <- colnames(gene_sample_matrix)
-
-data<-integer_matrix
-# Normalization function row gene and col sample
-normalized_matrix <- function(data,df) {
-  
-  #Negative probes
-  negative_probes <- data[grepl("Neg",rownames(data)),]
-  geo_means <- apply(negative_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
-  negativeprobes_normalized_matrix <- sweep(data, 2, geo_means, "/")
-  
-  #Housekeeping
-  housekeeping_probes <- data[rownames(data) %in% c("ACTB","GAPDH","RPLPO",
-                                                    "B2M","HPRT1","TBP","PPIA",
-                                                    "TUBB","SDHA","EIF4A1"),]
-  housekeeping_geo_means <- apply(housekeeping_probes, 2, function(x) exp(mean(log(x[x > 0]))))  
-  housekeeping_normalized_matrix <- sweep(data, 2, housekeeping_geo_means, "/")
-  
-  # CPM Normalization
-  cpm_matrix <- cpm(data)
-  cpm_matrix_negprobes<- sweep(cpm_matrix, 2, geo_means, "/")
-  cpm_matrix_housekeeping<- sweep(cpm_matrix, 2, housekeeping_geo_means, "/")
-  
-  #LOG CPM Normalization
-  log_cpm_matrix <- log2(cpm_matrix + 1)
-  log_cpm_matrix_negprobes<- sweep(log_cpm_matrix, 2, geo_means, "/")
-  log_cpm_matrix_housekeeping<- sweep(log_cpm_matrix, 2, housekeeping_geo_means, "/")
-  
-  #TMM Normalization 
-  dge <- DGEList(counts = data)
-  dge <- calcNormFactors(dge, method = "TMM")
-  tmm_matrix <- cpm(dge)
-  tmm_matrix_negprobes<- sweep(tmm_matrix, 2, geo_means, "/")
-  tmm_matrix_housekeeping<- sweep(tmm_matrix, 2, housekeeping_geo_means, "/")  
-  
-  
-  #QUANTILE
-  quantile_matrix<-normalizeBetweenArrays(data, method = "quantile")
-  quantile_matrix_negprobes<- sweep(quantile_matrix, 2, geo_means, "/")
-  quantile_matrix_housekeeping<- sweep(quantile_matrix, 2, housekeeping_geo_means, "/")  
-  
-  #THIRD QUANTILE
-  q3_values <- apply(data,2,quantile, probs = 0.75)
-  q3_matrix <- sweep(data, 2, q3_values, "/")
-  q3_matrix[!is.finite(q3_matrix)] <- 0
-  q3_matrix_negprobes<- sweep(q3_matrix , 2, geo_means, "/")
-  q3_matrix_housekeeping<- sweep(q3_matrix , 2, housekeeping_geo_means, "/")
-  
-  
-  #AREA
-  area_values <- df$Area
-  area_matrix <- sweep(data, 2, area_values, "/")
-  area_matrix[!is.finite(area_matrix)] <- 0
-  area_matrix_negprobes<- sweep(area_matrix , 2, geo_means, "/")
-  area_matrix_housekeeping<- sweep(area_matrix , 2, housekeeping_geo_means, "/")
-  
-  #NUCLEI
-  nuclei_values <- as.integer(df$Nuclei)
-  nuclei_matrix <- sweep(data, 2, nuclei_values, "/")
-  nuclei_matrix[!is.finite(nuclei_matrix)] <- 0
-  nuclei_matrix_negprobes<- sweep(nuclei_matrix , 2, geo_means, "/")
-  nuclei_matrix_housekeeping<- sweep(nuclei_matrix , 2, housekeeping_geo_means, "/")
-  
-  
-  #VST
-  pseudocount <- median(data[data > 0]) / 10 
-  vst_matrix <- log2(data + pseudocount)
-  vst_matrix_negprobes<- sweep(vst_matrix , 2, geo_means, "/")
-  vst_matrix_housekeeping<- sweep(vst_matrix , 2, housekeeping_geo_means, "/")
-  
-  #RLOG 
-  pseudocount <- 1
-  log_data <- log2(data + pseudocount)
-  gene_means <- rowMeans(log_data)
-  gene_sds <- apply(log_data, 1, sd)
-  rlog_matrix<- t(apply(log_data, 1, function(x) (x - mean(x)) / sd(x) * mean(x)))
-  rlog_matrix_negprobes<- sweep(rlog_matrix , 2, geo_means, "/")
-  rlog_matrix_housekeeping<- sweep(rlog_matrix , 2, housekeeping_geo_means, "/")
-  
-  list(
-    CPM = cpm_matrix,
-    TMM = tmm_matrix,
-    LogCPM = log_cpm_matrix,
-    RLOG = rlog_matrix,
-    VST = vst_matrix,
-    Quantile = quantile_matrix,
-    ThirdQuantile = q3_matrix,
-    Area=area_matrix,
-    Nuclei=nuclei_matrix,
-    NegProbes=negativeprobes_normalized_matrix,
-    Housekeeping=housekeeping_normalized_matrix,
-    NegProbes_CPM = cpm_matrix_negprobes,
-    Housekeeping_CPM = cpm_matrix_housekeeping,
-    NegProbes_LogCPM = log_cpm_matrix_negprobes,
-    Housekeeping_LogCPM = log_cpm_matrix_housekeeping,
-    NegProbes_TMM = tmm_matrix_negprobes,
-    Housekeeping_TMM = tmm_matrix_housekeeping,
-    NegProbes_Quantile = quantile_matrix_negprobes,
-    Housekeeping_Quantile = quantile_matrix_housekeeping,
-    NegProbes_ThirdQuantile = q3_matrix_negprobes,
-    Housekeeping_ThirdQuantile = q3_matrix_housekeeping,
-    NegProbes_Area = area_matrix_negprobes,
-    Housekeeping_Area = area_matrix_housekeeping,
-    NegProbes_Nuclei = nuclei_matrix_negprobes,
-    Housekeeping_Nuclei = nuclei_matrix_housekeeping,
-    NegProbes_VST = vst_matrix_negprobes,
-    Housekeeping_VST = vst_matrix_housekeeping,
-    NegProbes_RLOG = rlog_matrix_negprobes,
-    Housekeeping_RLOG = rlog_matrix_housekeeping
-  )
-}
-normalized_matrices <- normalized_matrix(data,df)
-
-
-
-for (norm_name in names(normalized_matrices)) {
-  #corrected_matrix <- removeBatchEffect(normalized_matrices[[norm_name]],batch=df$Batch, batch2=df$N_samples_istologico,group=df$Condition)
-  corrected_matrix <- removeBatchEffect(normalized_matrices[[norm_name]],batch=df$N_samples_istologico,group=df$Condition)
-  
-  normalized_matrices[[norm_name]]<-corrected_matrix
-}
+# ============================================================
+# 1. Load packages and input data
+# ============================================================
 
 library(reshape2)
 
+# Read sample metadata
+df <- read.table("CD68area_metadata.txt")
 
+# Read corrected CPM matrix
+# Rows = genes
+# Columns = samples / DCCs
+gene_sample_matrix <- read.csv2(
+  "MACRO_CPM_CORRECTED.csv",
+  sep = ";",
+  check.names = FALSE
+)
+
+# Convert to data.frame
+gene_sample_matrix <- as.data.frame(gene_sample_matrix)
+
+# Use the Gene column as row names
+rownames(gene_sample_matrix) <- gene_sample_matrix$Gene
+
+# Reorder/select the expression matrix columns
+# according to the FastqID order in the metadata
+gene_sample_matrix <- gene_sample_matrix[, df$FastqID]
+
+# Convert metadata to data.frame
+df <- as.data.frame(df)
+
+
+# ============================================================
+# 2. Prepare expression data
+# ============================================================
+
+# Initialize object containing the expression matrix
+normalized_matrices <- list()
+
+# Here normalized_matrices is actually a data.frame/matrix,
+# despite the name suggesting it is a list of matrices
+normalized_matrices <- gene_sample_matrix
+
+# Empty list reserved for storing results
 results_list <- list()
 
-#ERror with Third quartile
-for (norm_name in names(normalized_matrices)) {
-  # Get the normalized matrix
-  print(norm_name)
-  norm_matrix <- normalized_matrices[[norm_name]]
-  data <- melt(norm_matrix)
-  colnames(data) <- c("Gene", "DCC", "Value")
-  data <- merge(data, df, by.x = "DCC", by.y = "FastqID")
-  result <- data %>%
-    group_by(Gene) %>%
-    summarise(
-      Mean_NR = mean(Value[Condition == "NR"], na.rm = TRUE),
-      Mean_CR = mean(Value[Condition == "CR"], na.rm = TRUE),
-      P_Value = t.test(Value[Condition == "NR"], Value[Condition == "CR"])$p.value
-    ) %>%
-    mutate(Normalization = norm_name)
-  results_list[[norm_name]] <- result
-}
 
-#Negative probes
-final_results <- bind_rows(results_list)
-final_results<- final_results %>%
-  mutate(Significant = ifelse(P_Value < 0.05, 
-                              ifelse(Mean_CR > Mean_NR, "CR", "NR"),
-                              "No"),LFC=log(Mean_CR/Mean_NR,2))
+# ============================================================
+# 3. Convert expression matrix from wide to long format
+# ============================================================
+
+# Convert the gene × sample matrix into a long-format table:
+# one row = one gene/sample combination
+data <- melt(as.matrix(normalized_matrices))
+
+# Rename the columns
+# Gene = gene name
+# DCC  = sample identifier
+# Value = CPM-corrected expression value
+colnames(data) <- c("Gene", "DCC", "Value")
 
 
+# ============================================================
+# 4. Add sample metadata
+# ============================================================
+
+# Match each DCC/sample with its corresponding metadata
+# using FastqID
+data <- merge(
+  data,
+  df,
+  by.x = "DCC",
+  by.y = "FastqID"
+)
+
+# Remove A2M from the analysis
+data <- data[data$Gene != "A2M", ]
+
+
+# ============================================================
+# 5. Calculate CR vs NR statistics for each gene
+# ============================================================
+
+# For every gene:
+# - calculate the mean expression in NR
+# - calculate the mean expression in CR
+# - perform an unpaired t-test between NR and CR
+result <- data %>%
+  group_by(Gene) %>%
+  summarise(
+    
+    # Mean expression in non-responders
+    Mean_NR = mean(
+      Value[Condition == "NR"],
+      na.rm = TRUE
+    ),
+    
+    # Mean expression in responders
+    Mean_CR = mean(
+      Value[Condition == "CR"],
+      na.rm = TRUE
+    ),
+    
+    # P-value from the t-test comparing NR vs CR
+    P_Value = t.test(
+      Value[Condition == "NR"],
+      Value[Condition == "CR"]
+    )$p.value
+  )
+
+
+# ============================================================
+# 6. Identify significantly enriched genes
+# ============================================================
+
+# A gene is considered significant when P < 0.05.
+#
+# If significant:
+#   CR = higher mean expression in CR
+#   NR = higher mean expression in NR
+#
+# Otherwise:
+#   No = not significant
+#
+# LFC is initially calculated as log2(CR / NR)
+# but is recalculated below using the custom FoldChange.
+final_results <- result %>%
+  mutate(
+    Significant = ifelse(
+      P_Value < 0.05,
+      ifelse(Mean_CR > Mean_NR, "CR", "NR"),
+      "No"
+    ),
+    
+    LFC = log(Mean_CR / Mean_NR, 2)
+  )
+
+
+# ============================================================
+# 7. Calculate Fold Change
+# ============================================================
+
+# Calculate FoldChange while accounting for possible
+# positive and negative expression values.
+#
+# Case 1:
+#   CR >= 0 and NR >= 0
+#   -> standard CR / NR
+#
+# Case 2:
+#   CR >= 0 and NR < 0
+#   -> shifted ratio using 1 + value
+#
+# Case 3:
+#   CR < 0 and NR >= 0
+#   -> shifted ratio using absolute CR value
+#
+# Case 4:
+#   CR < 0 and NR < 0
+#   -> return NA
 final_results$FoldChange <- ifelse(
-  final_results$Mean_CR >= 0 & final_results$Mean_NR >= 0,
+  
+  # Both values are non-negative
+  final_results$Mean_CR >= 0 &
+    final_results$Mean_NR >= 0,
+  
   final_results$Mean_CR / final_results$Mean_NR,
   
   ifelse(
-    final_results$Mean_CR >= 0 & final_results$Mean_NR < 0,
-    (1 + final_results$Mean_CR) / (1 + abs(final_results$Mean_NR)),
+    
+    # CR positive, NR negative
+    final_results$Mean_CR >= 0 &
+      final_results$Mean_NR < 0,
+    
+    (1 + final_results$Mean_CR) /
+      (1 + abs(final_results$Mean_NR)),
     
     ifelse(
-      final_results$Mean_CR < 0 & final_results$Mean_NR >= 0,
-      (1 + abs(final_results$Mean_CR)) / (1 + final_results$Mean_NR),
       
-      NA  # fallback for both CR and NR < 0
+      # CR negative, NR positive
+      final_results$Mean_CR < 0 &
+        final_results$Mean_NR >= 0,
+      
+      (1 + abs(final_results$Mean_CR)) /
+        (1 + final_results$Mean_NR),
+      
+      # Both CR and NR are negative
+      NA
     )
   )
 )
 
-final_results$LFC<-log(final_results$FoldChange,2)
 
-DE_annotated <- final_results %>%
-  mutate(
-    hgnc_symbol = Gene,
-    logFC = LFC,
-    P.Value = ifelse(is.na(P_Value), 1, P_Value),
-    sig = ifelse(P_Value < 0.05 & abs(LFC) > 0.58, "YES", "NO"),
-    Module = case_when(
-      LFC > 0.58 & P_Value < 0.05 ~ "CR",
-      LFC < -0.58 & P_Value < 0.05 ~ "NR",
-      TRUE ~ NA_character_
-    )
-  )
+# Convert FoldChange to log2 fold change
+final_results$LFC <- log2(final_results$FoldChange)
 
-volcano_cols <- c(
-  CR = "#D55E00",
-  NR = "#0072B2"
+
+# ============================================================
+# 8. Assign genes to biological categories
+# ============================================================
+
+# Default category:
+# genes not belonging to any manually defined category
+# are classified as "Other".
+
+final_results$GeneType <- ifelse(
+  final_results$Gene %in% c(
+    "VEGFA", "SPP1", "ARG1", "HIF1A", "ANGPT2", "ADAM8",
+    "AREG", "BNIP3", "CCL2", "CCL4", "CCL20", "CD163",
+    "CD300E", "CD44", "CD55", "CEBPB", "CLEC5A",
+    "CTSB", "EREG", "FCN1", "FLT1", "FN1", "HES1",
+    "IL1B", "IL1RN", "IL8", "MAF", "MIF", "NR1H3",
+    "OLR1", "PPARG", "S100A8", "S100A9", "S100A12",
+    "SERPINB2", "SLC2A1", "SPIC", "THBS1", "TIMP1",
+    "VCAN"
+  ),
+  "angioTAM",
+  "Other"
 )
 
 
-ggplot(DE_annotated, aes(x = LFC, y = -log10(P.Value))) +
-  
-  geom_point(color = "grey70", alpha = 0.6) +
-  
-  geom_point(
-    data = subset(DE_annotated, sig == "YES"),
-    aes(color = Module),
-    size = 2
-  ) +
-  
-  geom_vline(xintercept = c(-0.58, 0.58), linetype = "dashed") +
-  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-  
-  geom_text_repel(
-    data = subset(DE_annotated, sig == "YES"),
-    aes(label = hgnc_symbol, color = Module),
-    size = 3,
-    max.overlaps = 20,
-    show.legend = FALSE
-  ) +
-  
-  scale_color_manual(values = volcano_cols) +
-  
-  theme_minimal(base_family = "Arial") +
-  theme(
-    legend.position = "right",
-    text = element_text(family = "Arial")
-  ) +
-  
-  labs(
-    x = expression(log[2]~Fold~Change),
-    y = expression(-log[10]~adjusted~italic(P)),
-    color = "",
-    title = "Macrophage differential expression"
+# ------------------------------------------------------------
+# Regulatory TAM (RegTAM)
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "CD274", "CX3CR1", "MERTK", "CCL2", "CD40",
+    "CD80", "CD86", "CHIT1", "HLA-A", "HLA-C",
+    "HLA-DQA1", "HLA-DQB1", "HLA-DRA", "HLA-DRB1",
+    "HLA-DRB5", "ICOSLG", "IL10", "ITGA4", "LGALS9",
+    "MACRO", "MRC1", "TGFB2"
   )
+] <- "RegTAM"
 
 
+# ------------------------------------------------------------
+# Inflammatory TAM (InflamTAM)
+# ------------------------------------------------------------
 
-DE_annotated$Module[DE_annotated$GeneID %in% c("C1QA", "C1QB", "CD163", "HIF1A", "LGALS3", "MMP7", "SPP1",
-                                               "ARG1", "CD44", "FLT1", "FN1", "OLR1", "PPARG", "SLC2A1", "VEGFA")]<-"NR"
-DE_annotated$sig[DE_annotated$GeneID %in% c("C1QA", "C1QB", "CD163", "HIF1A", "LGALS3", "MMP7", "SPP1",
-                                            "ARG1", "CD44", "FLT1", "FN1", "OLR1", "PPARG", "SLC2A1", "VEGFA")]<-"YES"
-
-ggplot(DE_annotated, aes(x = logFC, y = -log10(P.Value))) +
-  
-  geom_point(color = "grey70", alpha = 0.6) +
-  
-  geom_point(
-    data = subset(DE_annotated, sig == "YES"),
-    aes(color = Module),
-    size = 2
-  ) +
-  
-  geom_vline(xintercept = c(-0.58, 0.58), linetype = "dashed") +
-  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-  
-  geom_text_repel(
-    data = subset(DE_annotated, sig == "YES"),
-    aes(label = hgnc_symbol, color = Module),
-    size = 3,
-    max.overlaps = 20,
-    show.legend = FALSE
-  ) +
-  
-  scale_color_manual(values = volcano_cols) +
-  
-  theme_minimal(base_family = "Arial") +
-  theme(
-    legend.position = "right",
-    text = element_text(family = "Arial")
-  ) +
-  
-  labs(
-    x = expression(log[2]~Fold~Change),
-    y = expression(-log[10]~adjusted~italic(P)),
-    color = "",
-    title = "Macrophage differential expression"
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "CXCL1", "CXCL3", "NOS2", "IL1B", "IL6",
+    "CCL2", "CCL3", "CCL4", "CCL5", "CCL20",
+    "CCL3L1", "CCL3L3", "CCL4L2", "CCL4L4",
+    "CXCL2", "CXCL5", "CXCL8", "G0S2",
+    "IL1RN", "INHBA", "KLF2", "KLF6",
+    "NEDD9", "PMAIP1", "S100A8", "S100A9", "SPP1"
   )
+] <- "InflamTAM"
 
 
+# ------------------------------------------------------------
+# M1-like TAM markers
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "INOS", "TNF", "IL12", "HLA-DR", "CCR7",
+    "IFNG", "CD86", "CXCL9", "CXCL10", "CD80"
+  )
+] <- "M1-like Marker"
 
 
-final_results<-final_results[final_results$Gene %in% c("ARG1","MRC1","CD162","CHI3L1","IL12","CXCL9","CXCL10","CD80","APOC1","APOE","APC5","FABP5","ABCB1","MERTK","ANGPT2",
-                                                       "IL1B","CCL3","CXCL1","CXCL3","CXCL2",
-                                                       "CXCL2","IDO","ISG15","CXCL8","CXCL9",
-                                                       "CXCL10","ARG1","MRC1","CD274","CX3CR1",
-                                                       "MKI67","CDK1","VEGFA","SPP1","HIF1A","NOS2",
-                                                       "INOS","TNF","IL12","HLA-DR","EGF","TGFB","IL6",
-                                                       "CD163","CD206","IL10","TGFB","UBE2C","PCLAF","TK1",
-                                                       "CD36","FABP4","PLIN2","C1QA","C1QB","C1QC",
-                                                       "MRC1","CCR7","PTGS2","NLRP3","CCL3L1","CCL3","CXCL2",
-                                                       "PDGFB","THBS1","TOP2A","MKI67","PCLAF","UBE2C","TKT",
-                                                       "HSPA6","SERPINH1","BAG3","HSPB1","HSPD1","IFNG","CD206","CD86",
-                                                       "TGFB1","CD163", "MRC1", "IL10", "TGFB1","IL1B","TIE2",
-                                                       "HLA-DRA","CD74","CIITA","CD40","B2M","MMP9","MKI67","INOS","MMP2",
-                                                       "ISGI5","IFI6","IFIT3","STAT1","PCNA","HSP90B1","HSPA1A","HSPB1",
-                                                       "CCNA2", "CDC45", 
-                                                       "CDK1", "H2AFC","AREG","TIMP1","VCAN","FABP5","HIF1A",
-                                                       "HIST1H4C", "HMGB1",
-                                                       "HMGN2", "MKI67",
-                                                       "RRM2", "STMN1",
-                                                       "TOP2A", "TUBA1B",
-                                                       "TUBB", "TYMS", "CASP1", "CASP4",
-                                                       "CCL2", "CCL3", "CCL4", "CCL7", "CCL8",
-                                                       "CD274hi", "CD40",
-                                                       "CXCL2", "CXCL3", "CXCL9", "CXCL10", "CXCL11",
-                                                       "IDO1", "IFI6", "IFIT1", "IFIT2", "IFIT3",
-                                                       "IFITM1", "IFITM3", "IRF1", "IRF7",
-                                                       "ISG15", "LAMP3",
-                                                       "PDCD1LG2hi", "TNFSF10",
-                                                       "C1QA", "C1QC", "CD38", "IL4I1",
-                                                       "IFI44L",  "CCL2", "CCL3", "CCL4", "CCL5", "CCL20",
-                                                       "CCL3L1", "CCL3L3",
-                                                       "CCL4L2", "CCL4L4",
-                                                       "CXCL1", "CXCL2", "CXCL3", "CXCL5", "CXCL8",
-                                                       "G0S2", "IL1B", "IL1RN",
-                                                       "IL6", "INHBA", "KLF2", "KLF6",
-                                                       "NEDD9", "PMAIP1",
-                                                       "S100A8", "S100A9", "SPP1","ACP5", "AOPE", "APOC1",
-                                                       "ATF1", "C1QA", "C1QB", "C1QC",
-                                                       "CCL18", "CD163", "CD36",
-                                                       "CD63", "CHI3L1",
-                                                       "CTSB", "CTSD", "CTSL", "F13A1",
-                                                       "FABP5", "FOLR2",
-                                                       "GPNMB", "IRF3",
-                                                       "LGALS3", "LIPA", "LPL",
-                                                       "MACRO", "MerTK",
-                                                       "MMP7", "MMP9", "MMP12", "MRC1",
-                                                       "NR1H3", "NRF1", "NUPR1",
-                                                       "PLA2G7", "RNASE1",
-                                                       "SPARC", "SPP1", "TFDP2",
-                                                       "TREM2", "ZEB1", "ADAM8", "AREG", "BNIP3",
-                                                       "CCL2", "CCL4", "CCL20", "CD163",
-                                                       "CD300E", "CD44", "CD55",
-                                                       "CEBPB", "CLEC5A",
-                                                       "CTSB", "EREG", "FCN1",
-                                                       "FLT1", "FN1", "HES1", "IL1B",
-                                                       "IL1RN", "IL8", "MAF", "MIF",
-                                                       "NR1H3", "OLR1",
-                                                       "PPARG", "S100A8", "S100A9", "S100A12",
-                                                       "SERPINB2", "SLC2A1",
-                                                       "SPIC", "SPP1", "THBS1",
-                                                       "TIMP1", "VCAN", "VEGFA","CCL2", "CD274", "CD40",
-                                                       "CD80", "CD86", "CHIT1",
-                                                       "CX3CR1", "HLA-A", "HLA-C",
-                                                       "HLA-DQA1", "HLA-DQB1",
-                                                       "HLA-DRA", "HLA-DRB1", "HLA-DRB5",
-                                                       "ICOSLG", "IL10", "ITGA4",
-                                                       "LGALS9", "MACRO",
-                                                       "MRC1", "TGFB2","S100A4", "S100A6", "S100A8", "S100A9", "S100A12", "S100A13",
-                                                       "AREG", "CCL4", "CCR2",
-                                                       "CD14", "CD300E",
-                                                       "CD36", "CEBPD",
-                                                       "CLEC11A", "CLEC12A",
-                                                       "CSF1R", "CTSS",
-                                                       "CX3CR1", "CXCL2",
-                                                       "CXCR4", "EGR1", "FCN1",
-                                                       "FOS", "FTH1", "IL1B",
-                                                       "ITGAM", "JUNB",
-                                                       "LGALS2", "LY6C1",
-                                                       "LY6C2", "LYZ", "MAF",
-                                                       "MAFB", "MPEG1",
-                                                       "NFKB1", "NFKBIA",
-                                                       "NLRP3", "NR4A1",
-                                                       "NR4A2", "OSM", "PTGS2",
-                                                       "RGS2", "SELL", "THBS1",
-                                                       "VCAN","PRKACG", "IL22RA1", "CMKLR1", "TNC", "PAX8", "CLU", 
-                                                       "IRF2", "SELE", "TMEFF2", "PIM1", "CAMP", "NFATC2", 
-                                                       "TIE1", "IHH", "PSAT1","CXCR3", "FCGR1A", "NDUFA1", "TYMS", "BCL6", 
-                                                       "GADL1", "CD24", "FCRL2", "MAML2", "TBL1XR1", "ITGB4"
-                                                       ),]
-library(ggplot2)
-ggplot(final_results, aes(y = Gene, x = Normalization, fill = Significant)) +
-  geom_tile(color = "white") +  # White borders for clarity
-  scale_fill_manual(values = c("CR" = "#f33073", "NR" = "#30b1f3", "No" = "lightgrey")) +
-  labs(title = "Macrophage areas",
-       x = "Normalization", y = "Gene", fill = "Significant") +
-  theme_minimal()   +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1,size=14),
-        axis.text.y = element_text(size=14))
+# ------------------------------------------------------------
+# M2-like TAM markers
+# ------------------------------------------------------------
 
-#final_results<-final_results[final_results$Significant!="No",]
-final_results<-final_results[final_results$Normalization=="CPM",]
-final_results$GeneType <- ifelse(final_results$Gene %in% c("VEGFA","SPP1","ARG1","HIF1A","ANGPT2", "ADAM8", "AREG", "BNIP3",
-                                                           "CCL2", "CCL4", "CCL20", "CD163",
-                                                           "CD300E", "CD44", "CD55",
-                                                           "CEBPB", "CLEC5A",
-                                                           "CTSB", "EREG", "FCN1",
-                                                           "FLT1", "FN1", "HES1", "IL1B",
-                                                           "IL1RN", "IL8", "MAF", "MIF",
-                                                           "NR1H3", "OLR1",
-                                                           "PPARG", "S100A8", "S100A9", "S100A12",
-                                                           "SERPINB2", "SLC2A1",
-                                                           "SPIC", "SPP1", "THBS1","AREG","TIMP1","VCAN",
-                                                           "TIMP1", "VCAN", "VEGFA"), "angioTAM", "Other")
-final_results$GeneType[final_results$Gene %in% c("CD274","CX3CR1","MERTK","CCL2", "CD274", "CD40",
-                                                 "CD80", "CD86", "CHIT1",
-                                                 "CX3CR1", "HLA-A", "HLA-C",
-                                                 "HLA-DQA1", "HLA-DQB1",
-                                                 "HLA-DRA", "HLA-DRB1", "HLA-DRB5",
-                                                 "ICOSLG", "IL10", "ITGA4",
-                                                 "LGALS9", "MACRO",
-                                                 "MRC1", "TGFB2")]<-"RegTAM"
-final_results$GeneType[final_results$Gene %in% c("CXCL1","CXCL3","NOS2","IL1B","IL6",  "CCL2", "CCL3", "CCL4", "CCL5", "CCL20",
-                                                 "CCL3L1", "CCL3L3",
-                                                 "CCL4L2", "CCL4L4",
-                                                 "CXCL1", "CXCL2", "CXCL3", "CXCL5", "CXCL8",
-                                                 "G0S2", "IL1B", "IL1RN",
-                                                 "IL6", "INHBA", "KLF2", "KLF6",
-                                                 "NEDD9", "PMAIP1",
-                                                 "S100A8", "S100A9", "SPP1")]<-"InflamTAM"
-final_results$GeneType[final_results$Gene %in% c("INOS","TNF","IL12","HLA-DR","CCR7","IFNG","CD86","IL12","CXCL9","CXCL10","CD80")]<-"M1-like Marker"
-final_results$GeneType[final_results$Gene %in% c("CD163","CD206","IL10","TGFB1","MRC1")]<-"M2-like Marker"
-#final_results$GeneType[final_results$Gene %in% c("CD36","FABP4","PLIN2")]<-"Lipid Loaded TAM"
-final_results$GeneType[final_results$Gene %in% c("C1QA","C1QB","C1QC")]<-"Complement system"
-final_results$GeneType[final_results$Gene %in% c("TOP2A","MKI67","PCLAF","UBE2C","TKT","PCNA",
-                                                 "CCNA2", "CDC45", 
-                                                 "CDK1", "H2AFC",
-                                                 "HIST1H4C", "HMGB1",
-                                                 "HMGN2", "MKI67",
-                                                 "RRM2", "STMN1",
-                                                 "TOP2A", "TUBA1B",
-                                                 "TUBB", "TYMS")]<-"prolifTAM"
-final_results$GeneType[final_results$Gene %in% c("HSPA6","SERPINH1","BAG3","HSPB1","HSPD1","HSP90B1","HSPA1A","HSPB1")]<-"Heat schock TAM"
-final_results$GeneType[final_results$Gene %in% c("ISGI5","IFI6","IFIT3","STAT1","CXCL8","CXCL9","CXCL10", "CASP1", "CASP4",
-                                                 "CCL2", "CCL3", "CCL4", "CCL7", "CCL8",
-                                                 "CD274hi", "CD40",
-                                                 "CXCL2", "CXCL3", "CXCL9", "CXCL10", "CXCL11",
-                                                 "IDO1", "IFI6", "IFIT1", "IFIT2", "IFIT3",
-                                                 "IFITM1", "IFITM3", "IRF1", "IRF7",
-                                                 "ISG15", "LAMP3",
-                                                 "PDCD1LG2hi", "TNFSF10",
-                                                 "C1QA", "C1QC", "CD38", "IL4I1",
-                                                 "IFI44L")]<-"Interferon TAM"
-final_results$GeneType[final_results$Gene %in% c("ACP5", "AOPE", "APOC1",
-"ATF1", "C1QA", "C1QB", "C1QC",
-"CCL18", "CD163", "CD36",
-"CD63", "CHI3L1",
-"CTSB", "CTSD", "CTSL", "F13A1",
-"FABP5", "FOLR2",
-"GPNMB", "IRF3",
-"LGALS3", "LIPA", "LPL",
-"MACRO", "MerTK",
-"MMP7", "MMP9", "MMP12", "MRC1",
-"NR1H3", "NRF1", "NUPR1",
-"PLA2G7", "RNASE1",
-"SPARC", "SPP1", "TFDP2","FABP5","HIF1A",
-"TREM2", "ZEB1")]<-"LA TAM"
-
-final_results$GeneType[final_results$Gene %in% c("S100A4", "S100A6", "S100A8", "S100A9", "S100A12", "S100A13",
- "CCL4", "CCR2",
-"CD14", "CD300E",
-"CD36", "CEBPD",
-"CLEC11A", "CLEC12A",
-"CSF1R", "CTSS",
-"CX3CR1", "CXCL2")]<-"TIM1"
-final_results$GeneType[final_results$Gene %in% c("CXCR4", "EGR1", "FCN1",
-                                                 "FOS", "FTH1", "IL1B",
-                                                 "ITGAM", "JUNB",
-                                                 "LGALS2", "LY6C1","LY6C2", "LYZ", "MAF",
-"MAFB", "MPEG1",
-"NFKB1", "NFKBIA",
-"NLRP3", "NR4A1",
-"NR4A2", "OSM", "PTGS2",
-"RGS2", "SELL", "THBS1")]<-"TIM2"
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "CD163", "CD206", "IL10", "TGFB1", "MRC1"
+  )
+] <- "M2-like Marker"
 
 
-final_results$GeneType[final_results$Gene %in% c(
-  "PRKACG", "IL22RA1", "CMKLR1", "TNC", "PAX8", "CLU", 
-  "IRF2", "SELE", "TMEFF2", "PIM1", "CAMP", "NFATC2", 
-  "TIE1", "IHH", "PSAT1"
-)]<-"NR significant"
+# ------------------------------------------------------------
+# Complement system
+# ------------------------------------------------------------
 
-final_results$GeneType[final_results$Gene %in% c(
-  "CXCR3", "FCGR1A", "NDUFA1", "TYMS", "BCL6", 
-  "GADL1", "CD24", "FCRL2", "MAML2", "TBL1XR1", "ITGB4"
-)]<-"CR significant"
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "C1QA", "C1QB", "C1QC"
+  )
+] <- "Complement system"
 
 
+# ------------------------------------------------------------
+# Proliferating TAM
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "TOP2A", "MKI67", "PCLAF", "UBE2C", "TKT",
+    "PCNA", "CCNA2", "CDC45", "CDK1", "H2AFC",
+    "HIST1H4C", "HMGB1", "HMGN2", "RRM2",
+    "STMN1", "TUBA1B", "TUBB", "TYMS"
+  )
+] <- "prolifTAM"
+
+
+# ------------------------------------------------------------
+# Heat-shock TAM
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "HSPA6", "SERPINH1", "BAG3", "HSPB1",
+    "HSPD1", "HSP90B1", "HSPA1A"
+  )
+] <- "Heat schock TAM"
+
+
+# ------------------------------------------------------------
+# Interferon TAM
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "ISGI5", "IFI6", "IFIT3", "STAT1", "CXCL8",
+    "CXCL9", "CXCL10", "CASP1", "CASP4", "CCL2",
+    "CCL3", "CCL4", "CCL7", "CCL8", "CD274hi",
+    "CD40", "CXCL2", "CXCL3", "CXCL11", "IDO1",
+    "IFIT1", "IFIT2", "IFITM1", "IFITM3", "IRF1",
+    "IRF7", "ISG15", "LAMP3", "PDCD1LG2hi",
+    "TNFSF10", "C1QA", "C1QC", "CD38", "IL4I1",
+    "IFI44L"
+  )
+] <- "Interferon TAM"
+
+
+# ------------------------------------------------------------
+# Lipid-associated TAM (LA TAM)
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "ACP5", "AOPE", "APOC1", "ATF1", "C1QA", "C1QB",
+    "C1QC", "CCL18", "CD163", "CD36", "CD63",
+    "CHI3L1", "CTSB", "CTSD", "CTSL", "F13A1",
+    "FABP5", "FOLR2", "GPNMB", "IRF3", "LGALS3",
+    "LIPA", "LPL", "MACRO", "MerTK", "MMP7",
+    "MMP9", "MMP12", "MRC1", "NR1H3", "NRF1",
+    "NUPR1", "PLA2G7", "RNASE1", "SPARC", "SPP1",
+    "TFDP2", "HIF1A", "TREM2", "ZEB1"
+  )
+] <- "LA TAM"
+
+
+# ------------------------------------------------------------
+# TIM1
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "S100A4", "S100A6", "S100A8", "S100A9",
+    "S100A12", "S100A13", "CCL4", "CCR2", "CD14",
+    "CD300E", "CD36", "CEBPD", "CLEC11A",
+    "CLEC12A", "CSF1R", "CTSS", "CX3CR1", "CXCL2"
+  )
+] <- "TIM1"
+
+
+# ------------------------------------------------------------
+# TIM2
+# ------------------------------------------------------------
+
+final_results$GeneType[
+  final_results$Gene %in% c(
+    "CXCR4", "EGR1", "FCN1", "FOS", "FTH1",
+    "IL1B", "ITGAM", "JUNB", "LGALS2", "LY6C1",
+    "LY6C2", "LYZ", "MAF", "MAFB", "MPEG1",
+    "NFKB1", "NFKBIA", "NLRP3", "NR4A1", "NR4A2",
+    "OSM", "PTGS2", "RGS2", "SELL", "THBS1"
+  )
+] <- "TIM2"
+
+
+# ============================================================
+# 9. Order genes for plotting
+# ============================================================
+
+# Convert Gene to a factor so that genes are displayed
+# in reverse alphabetical order on the y-axis
 final_results <- final_results %>%
-  mutate(Gene = factor(Gene, levels = sort(unique(Gene), decreasing = TRUE)))
-#final_results <- final_results[final_results$GeneType %in% c("NR significant"),]
-final_results$Enriched<-final_results$Significant
-ggplot(final_results, aes(y = Gene, x = 1,color=Enriched))+geom_point(aes(size=abs(LFC)))+
-  facet_wrap(~GeneType, scales = "free_y", strip.position = "left") + 
-   theme_minimal(base_family = "Arial") +
-theme(
-    axis.text.y = element_text(size = 12, family = "Arial",color="black"),
-    axis.text.x = element_text(family = "Arial",color="black"),
-    axis.title = element_text(family = "Arial",color="black"),
-    strip.text = element_text(size = 15,family = "Arial", color="black"),
-    legend.text = element_text(family = "Arial",color="black"),
-    legend.title = element_text(family = "Arial",color="black"),
-    text = element_text(family = "Arial",color="black")
-  )+
-  scale_color_manual(values = c(
-    "No" = "grey",
-    "CR" = "#F8766D","NR"="#00BFC4"
-  ))+  guides(
+  mutate(
+    Gene = factor(
+      Gene,
+      levels = sort(unique(Gene), decreasing = TRUE)
+    )
+  )
+
+# Optional filtering if only a specific GeneType is required
+# final_results <- final_results[
+#   final_results$GeneType %in% c("NR significant"),
+# ]
+
+
+# ============================================================
+# 10. Define enrichment variable
+# ============================================================
+
+# Use the Significant classification for plotting
+# CR = significantly higher in CR
+# NR = significantly higher in NR
+# No = not significant
+final_results$Enriched <- final_results$Significant
+
+
+# ============================================================
+# 11. Generate dot plot
+# ============================================================
+
+ggplot(
+  final_results,
+  aes(
+    y = Gene,
+    x = 1,
+    color = Enriched
+  )
+) +
+  
+  # Dot size represents the absolute log2 fold change
+  geom_point(
+    aes(size = abs(LFC))
+  ) +
+  
+  # Separate genes according to their manually assigned
+  # biological category
+  facet_wrap(
+    ~GeneType,
+    scales = "free_y",
+    strip.position = "left"
+  ) +
+  
+  # Minimal theme with Arial font
+  theme_minimal(base_family = "Arial") +
+  
+  theme(
+    axis.text.y = element_text(
+      size = 12,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.text.x = element_text(
+      family = "Arial",
+      color = "black"
+    ),
+    axis.title = element_text(
+      family = "Arial",
+      color = "black"
+    ),
+    strip.text = element_text(
+      size = 15,
+      family = "Arial",
+      color = "black"
+    ),
+    legend.text = element_text(
+      family = "Arial",
+      color = "black"
+    ),
+    legend.title = element_text(
+      family = "Arial",
+      color = "black"
+    ),
+    text = element_text(
+      family = "Arial",
+      color = "black"
+    )
+  ) +
+  
+  # Define colors for enrichment status
+  scale_color_manual(
+    values = c(
+      "No" = "grey",
+      "CR" = "#F8766D",
+      "NR" = "#00BFC4"
+    )
+  ) +
+  
+  # Make legend dots easier to see
+  guides(
     color = guide_legend(
       override.aes = list(size = 5)
     )
-  ) 
+  )
